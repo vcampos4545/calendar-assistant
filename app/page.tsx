@@ -19,16 +19,13 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (session) {
+    if (session && !session.error) {
       setLoading(true);
       fetch("/api/calendar")
         .then((res) => res.json())
         .then((data) => {
-          if (data.error) {
-            setError(data.error);
-          } else {
-            setEvents(data.events);
-          }
+          if (data.error) setError(data.error);
+          else setEvents(data.events);
         })
         .catch(() => setError("Failed to fetch calendar events"))
         .finally(() => setLoading(false));
@@ -86,6 +83,22 @@ export default function Home() {
       </header>
 
       <main className="max-w-2xl mx-auto px-6 py-10">
+        {/* Session expired banner */}
+        {session?.error === "RefreshAccessTokenError" && (
+          <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 px-4 py-3">
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              Your session has expired.
+            </p>
+            <button
+              onClick={() => signIn("google")}
+              className="shrink-0 text-sm px-3 py-1.5 rounded-md bg-amber-800 dark:bg-amber-300 text-white dark:text-amber-950 hover:opacity-90 transition-opacity"
+            >
+              Sign in again
+            </button>
+          </div>
+        )}
+
+        {/* Signed-out state */}
         {!session && status !== "loading" && (
           <div className="text-center py-20">
             <h2 className="text-xl font-medium text-zinc-700 dark:text-zinc-300 mb-2">
@@ -103,9 +116,10 @@ export default function Home() {
           </div>
         )}
 
+        {/* Signed-in state */}
         {session && (
           <>
-            <h2 className="text-base font-medium text-zinc-800 dark:text-zinc-200 mb-4">
+            <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-6">
               Upcoming Events
             </h2>
 
