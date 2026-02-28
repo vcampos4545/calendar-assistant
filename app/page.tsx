@@ -12,6 +12,60 @@ interface CalendarEvent {
   location?: string;
 }
 
+// Returns the YYYY-MM-DD key for an event
+function eventDateKey(event: CalendarEvent): string {
+  if (event.start?.dateTime) return event.start.dateTime.slice(0, 10);
+  return event.start?.date ?? "unknown";
+}
+
+// Groups a sorted event list into [dateKey, events[]] pairs
+function groupByDay(events: CalendarEvent[]): [string, CalendarEvent[]][] {
+  const map = new Map<string, CalendarEvent[]>();
+  for (const event of events) {
+    const key = eventDateKey(event);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(event);
+  }
+  return Array.from(map.entries());
+}
+
+function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+
+  // Parse as local date to avoid UTC offset shifting the day
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+
+  if (date.getTime() === today.getTime()) return { label: "Today", isToday: true };
+  if (date.getTime() === tomorrow.getTime()) return { label: "Tomorrow", isToday: false };
+
+  return {
+    label: date.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    }),
+    isToday: false,
+  };
+}
+
+function formatTimeRange(event: CalendarEvent): string {
+  if (!event.start?.dateTime) return "All day";
+
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
+  const start = fmt(event.start.dateTime);
+  const end = event.end?.dateTime ? fmt(event.end.dateTime) : null;
+  return end ? `${start} – ${end}` : start;
+}
+
 export default function Home() {
   const { data: session, status } = useSession();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -32,28 +86,11 @@ export default function Home() {
     }
   }, [session]);
 
-  function formatEventTime(event: CalendarEvent) {
-    const start = event.start?.dateTime ?? event.start?.date;
-    if (!start) return "No time";
-    const date = new Date(start);
-    if (event.start?.dateTime) {
-      return date.toLocaleString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    }
-    return date.toLocaleDateString(undefined, {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-  }
+  const grouped = groupByDay(events);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 font-sans">
+      {/* Header */}
       <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-6 py-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
           Calendar Assistant
@@ -135,26 +172,64 @@ export default function Home() {
               <p className="text-sm text-zinc-400">No upcoming events found.</p>
             )}
 
-            <ul className="space-y-3">
-              {events.map((event) => (
-                <li
-                  key={event.id}
-                  className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3"
-                >
-                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    {event.summary ?? "(No title)"}
-                  </p>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    {formatEventTime(event)}
-                  </p>
-                  {event.location && (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">
-                      {event.location}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
+            {!loading && !error && grouped.length > 0 && (
+              <div className="space-y-8">
+                {grouped.map(([dateKey, dayEvents]) => {
+                  const { label, isToday } = formatDayLabel(dateKey);
+                  return (
+                    <section key={dateKey}>
+                      {/* Day header */}
+                      <div className="flex items-center gap-3 mb-3">
+                        <span
+                          className={`text-xs font-semibold tracking-wide uppercase whitespace-nowrap ${
+                            isToday
+                              ? "text-blue-600 dark:text-blue-400"
+                              : "text-zinc-400 dark:text-zinc-500"
+                          }`}
+                        >
+                          {label}
+                        </span>
+                        <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
+                      </div>
+
+                      {/* Events for this day */}
+                      <ul className="space-y-2">
+                        {dayEvents.map((event) => {
+                          const timeRange = formatTimeRange(event);
+                          const isAllDay = !event.start?.dateTime;
+                          return (
+                            <li
+                              key={event.id}
+                              className="flex items-start justify-between gap-4 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-3"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                                  {event.summary ?? "(No title)"}
+                                </p>
+                                {event.location && (
+                                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                                    {event.location}
+                                  </p>
+                                )}
+                              </div>
+                              <span
+                                className={`shrink-0 text-xs mt-0.5 ${
+                                  isAllDay
+                                    ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded px-1.5 py-0.5"
+                                    : "text-zinc-400 dark:text-zinc-500"
+                                }`}
+                              >
+                                {timeRange}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
       </main>
