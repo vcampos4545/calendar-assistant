@@ -12,13 +12,57 @@ interface CalendarEvent {
   location?: string;
 }
 
-// Returns the YYYY-MM-DD key for an event
+// ---------------------------------------------------------------------------
+// Date helpers
+// ---------------------------------------------------------------------------
+
+function toLocalDateStr(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+// Returns Mon–Sun bounds for the given week offset from today's week
+function getWeekBounds(offset: number): { start: Date; end: Date } {
+  const now = new Date();
+  const dow = now.getDay(); // 0=Sun … 6=Sat
+  const sinceMonday = dow === 0 ? 6 : dow - 1;
+
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - sinceMonday + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+
+  return { start: monday, end: sunday };
+}
+
+function formatWeekLabel(start: Date, end: Date): string {
+  const startStr = start.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  const endStr = end.toLocaleDateString(undefined, {
+    month: start.getMonth() !== end.getMonth() ? "short" : undefined,
+    day: "numeric",
+    year: "numeric",
+  });
+  return `${startStr} – ${endStr}`;
+}
+
+// ---------------------------------------------------------------------------
+// Event grouping / formatting
+// ---------------------------------------------------------------------------
+
 function eventDateKey(event: CalendarEvent): string {
   if (event.start?.dateTime) return event.start.dateTime.slice(0, 10);
   return event.start?.date ?? "unknown";
 }
 
-// Groups a sorted event list into [dateKey, events[]] pairs
 function groupByDay(events: CalendarEvent[]): [string, CalendarEvent[]][] {
   const map = new Map<string, CalendarEvent[]>();
   for (const event of events) {
@@ -32,15 +76,11 @@ function groupByDay(events: CalendarEvent[]): [string, CalendarEvent[]][] {
 function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
 
-  // Parse as local date to avoid UTC offset shifting the day
   const [y, m, d] = dateKey.split("-").map(Number);
   const date = new Date(y, m - 1, d);
 
   if (date.getTime() === today.getTime()) return { label: "Today", isToday: true };
-  if (date.getTime() === tomorrow.getTime()) return { label: "Tomorrow", isToday: false };
 
   return {
     label: date.toLocaleDateString(undefined, {
@@ -54,37 +94,67 @@ function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
 
 function formatTimeRange(event: CalendarEvent): string {
   if (!event.start?.dateTime) return "All day";
-
   const fmt = (iso: string) =>
     new Date(iso).toLocaleTimeString(undefined, {
       hour: "numeric",
       minute: "2-digit",
     });
-
   const start = fmt(event.start.dateTime);
   const end = event.end?.dateTime ? fmt(event.end.dateTime) : null;
   return end ? `${start} – ${end}` : start;
 }
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+function ChevronLeft() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+      <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function ChevronRight() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+      <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 export default function Home() {
   const { data: session, status } = useSession();
+  const [weekOffset, setWeekOffset] = useState(0);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { start: weekStart, end: weekEnd } = getWeekBounds(weekOffset);
+  const weekLabel = formatWeekLabel(weekStart, weekEnd);
+
   useEffect(() => {
-    if (session && !session.error) {
-      setLoading(true);
-      fetch("/api/calendar")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.error) setError(data.error);
-          else setEvents(data.events);
-        })
-        .catch(() => setError("Failed to fetch calendar events"))
-        .finally(() => setLoading(false));
-    }
-  }, [session]);
+    if (!session || session.error) return;
+
+    setLoading(true);
+    setError(null);
+    setEvents([]);
+
+    const startStr = toLocalDateStr(weekStart);
+    const endStr = toLocalDateStr(weekEnd);
+
+    fetch(`/api/calendar?start=${startStr}&end=${endStr}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) setError(data.error);
+        else setEvents(data.events);
+      })
+      .catch(() => setError("Failed to fetch calendar events"))
+      .finally(() => setLoading(false));
+  // weekStart/weekEnd are derived from weekOffset — depend on that directly
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, weekOffset]);
 
   const grouped = groupByDay(events);
 
@@ -156,9 +226,36 @@ export default function Home() {
         {/* Signed-in state */}
         {session && (
           <>
-            <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-6">
-              Upcoming Events
-            </h2>
+            {/* Week navigation */}
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                {weekLabel}
+              </h2>
+              <div className="flex items-center gap-1">
+                {weekOffset !== 0 && (
+                  <button
+                    onClick={() => setWeekOffset(0)}
+                    className="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors mr-1"
+                  >
+                    Today
+                  </button>
+                )}
+                <button
+                  onClick={() => setWeekOffset((o) => o - 1)}
+                  className="p-1.5 rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  aria-label="Previous week"
+                >
+                  <ChevronLeft />
+                </button>
+                <button
+                  onClick={() => setWeekOffset((o) => o + 1)}
+                  className="p-1.5 rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  aria-label="Next week"
+                >
+                  <ChevronRight />
+                </button>
+              </div>
+            </div>
 
             {loading && (
               <p className="text-sm text-zinc-400">Fetching events...</p>
@@ -169,7 +266,7 @@ export default function Home() {
             )}
 
             {!loading && !error && events.length === 0 && (
-              <p className="text-sm text-zinc-400">No upcoming events found.</p>
+              <p className="text-sm text-zinc-400">No events this week.</p>
             )}
 
             {!loading && !error && grouped.length > 0 && (
@@ -178,7 +275,6 @@ export default function Home() {
                   const { label, isToday } = formatDayLabel(dateKey);
                   return (
                     <section key={dateKey}>
-                      {/* Day header */}
                       <div className="flex items-center gap-3 mb-3">
                         <span
                           className={`text-xs font-semibold tracking-wide uppercase whitespace-nowrap ${
@@ -192,7 +288,6 @@ export default function Home() {
                         <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
                       </div>
 
-                      {/* Events for this day */}
                       <ul className="space-y-2">
                         {dayEvents.map((event) => {
                           const timeRange = formatTimeRange(event);
