@@ -162,45 +162,51 @@ export async function executeTool(
     };
   }
 
-  switch (name) {
-    case "get_events":
-      return getEvents(
-        accessToken,
-        args.start_date as string,
-        args.end_date as string,
-      );
+  try {
+    switch (name) {
+      case "get_events":
+        return getEvents(
+          accessToken,
+          args.start_date as string,
+          args.end_date as string,
+        );
 
-    case "create_calendar_event":
-      return createCalendarEvent(
-        accessToken,
-        args.summary as string,
-        args.start_datetime as string,
-        args.end_datetime as string,
-        args.description as string | undefined,
-        args.location as string | undefined,
-      );
+      case "create_calendar_event":
+        return createCalendarEvent(
+          accessToken,
+          args.summary as string,
+          args.start_datetime as string,
+          args.end_datetime as string,
+          args.description as string | undefined,
+          args.location as string | undefined,
+        );
 
-    case "update_calendar_event":
-      return updateCalendarEvent(accessToken, args.event_id as string, {
-        summary: args.summary as string | undefined,
-        start_datetime: args.start_datetime as string | undefined,
-        end_datetime: args.end_datetime as string | undefined,
-        description: args.description as string | undefined,
-        location: args.location as string | undefined,
-      });
+      case "update_calendar_event":
+        return updateCalendarEvent(accessToken, args.event_id as string, {
+          summary: args.summary as string | undefined,
+          start_datetime: args.start_datetime as string | undefined,
+          end_datetime: args.end_datetime as string | undefined,
+          description: args.description as string | undefined,
+          location: args.location as string | undefined,
+        });
 
-    case "delete_calendar_event":
-      return deleteCalendarEvent(accessToken, args.event_id as string);
+      case "delete_calendar_event":
+        return deleteCalendarEvent(accessToken, args.event_id as string);
 
-    case "get_free_slots": {
-      const startDate = args.start_date as string;
-      const endDate = args.end_date as string;
-      const duration = (args.duration_minutes as number | undefined) ?? 30;
-      return getFreeSlots(accessToken, startDate, endDate, duration);
+      case "get_free_slots": {
+        const startDate = args.start_date as string;
+        const endDate = args.end_date as string;
+        const duration = (args.duration_minutes as number | undefined) ?? 30;
+        return getFreeSlots(accessToken, startDate, endDate, duration);
+      }
+
+      default:
+        return { error: `Unknown tool: ${name}` };
     }
-
-    default:
-      return { error: `Unknown tool: ${name}` };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Tool "${name}" threw:`, message);
+    return { error: message };
   }
 }
 
@@ -391,6 +397,19 @@ function toRFC3339WithOffset(dt: string): string {
   const withSecs = /T\d{2}:\d{2}$/.test(clean) ? `${clean}:00` : clean;
   // Parse as local time — Node.js treats YYYY-MM-DDTHH:MM:SS (no suffix) as local
   const date = new Date(withSecs);
+  if (isNaN(date.getTime())) throw new Error(`Invalid datetime: "${dt}"`);
+  // Detect JS silently rolling over invalid dates (e.g. Feb 29 in a non-leap year)
+  const [datePart] = withSecs.split("T");
+  const [y, m, d] = datePart.split("-").map(Number);
+  if (
+    date.getFullYear() !== y ||
+    date.getMonth() + 1 !== m ||
+    date.getDate() !== d
+  ) {
+    throw new Error(
+      `"${datePart}" is not a valid calendar date. Please use an existing date.`,
+    );
+  }
   // getTimezoneOffset() = minutes to add to local to get UTC, so negate for the offset
   const offsetMin = -date.getTimezoneOffset();
   const sign = offsetMin >= 0 ? "+" : "-";

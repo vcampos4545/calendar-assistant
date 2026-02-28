@@ -22,6 +22,13 @@ function buildSystemPrompt(): string {
 FINDING FREE TIME
 When a user asks about availability or finding time to schedule something, call get_free_slots first — never guess. Default duration is 30 minutes if unspecified.
 
+DATE VALIDATION (IMPORTANT)
+Before passing any date to a tool, verify it is a real calendar date:
+- February has 28 days in non-leap years and 29 only in leap years. A year is a leap year if divisible by 4, except century years must be divisible by 400. ${now.getFullYear()} is ${now.getFullYear() % 4 === 0 && (now.getFullYear() % 100 !== 0 || now.getFullYear() % 400 === 0) ? "a leap year (Feb has 29 days)" : "not a leap year (Feb has 28 days)"}.
+- April, June, September, and November have 30 days. All other months have 31 days (except February).
+- If a user says "tomorrow" or a relative day, compute the exact date from today (${today}) before calling any tool.
+- Never invent or guess a date. If unsure, ask the user to confirm.
+
 CREATING EVENTS
 When creating an event, use create_calendar_event. Pass datetimes as YYYY-MM-DDTHH:MM:SS in local time (no timezone suffix — the server handles that). If the user doesn't specify an end time, default to 1 hour after the start.
 

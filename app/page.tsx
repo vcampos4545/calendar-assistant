@@ -127,6 +127,7 @@ function ChevronRight() {
 export default function Home() {
   const { data: session, status } = useSession();
   const [weekOffset, setWeekOffset] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +155,7 @@ export default function Home() {
       .finally(() => setLoading(false));
   // weekStart/weekEnd are derived from weekOffset — depend on that directly
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, weekOffset]);
+  }, [session, weekOffset, refreshKey]);
 
   const grouped = groupByDay(events);
 
@@ -329,7 +330,7 @@ export default function Home() {
         )}
       </main>
 
-      <Chat />
+      <Chat onCalendarChange={() => setRefreshKey((k) => k + 1)} />
     </div>
   );
 }

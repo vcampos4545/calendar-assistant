@@ -63,7 +63,11 @@ function TypingIndicator() {
   );
 }
 
-export function Chat() {
+interface ChatProps {
+  onCalendarChange?: () => void;
+}
+
+export function Chat({ onCalendarChange }: ChatProps) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -130,6 +134,7 @@ export function Chat() {
       }
     } finally {
       setStreaming(false);
+      onCalendarChange?.();
     }
   }
 
