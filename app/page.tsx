@@ -305,7 +305,12 @@ export default function Home() {
           {/* ── Main content ── */}
           <main className="flex-1 overflow-hidden min-w-0">
             {activeTab === "calendar" && isAuthenticated && (
-              <WeekView weekStart={weekStart} events={events} loading={loading} />
+              <WeekView
+                weekStart={weekStart}
+                events={events}
+                loading={loading}
+                onCalendarChange={() => setRefreshKey((k) => k + 1)}
+              />
             )}
             {activeTab === "analytics" && analyticsStats && (
               <AnalyticsPanel stats={analyticsStats} />
