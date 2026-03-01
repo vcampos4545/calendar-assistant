@@ -1,20 +1,35 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import type { UserPreferences } from "@/lib/preferences";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
+export interface ChatHandle {
+  sendMessage: (text: string) => void;
+}
+
+interface ChatProps {
+  onCalendarChange?: () => void;
+  preferences?: UserPreferences;
+}
+
+// ---------------------------------------------------------------------------
+// Icons
+// ---------------------------------------------------------------------------
+
 function MessageBubbleIcon() {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className="w-5 h-5"
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
       <path d="M4.913 2.658c2.075-.27 4.19-.408 6.337-.408 2.147 0 4.262.139 6.337.408 1.922.25 3.291 1.861 3.405 3.727a4.403 4.403 0 0 0-1.032-.211 50.89 50.89 0 0 0-8.42 0c-2.358.196-4.04 2.19-4.04 4.434v4.286a4.47 4.47 0 0 0 2.433 3.984L7.28 21.53A.75.75 0 0 1 6 21v-4.03a48.527 48.527 0 0 1-1.087-.128C2.905 16.58 1.5 14.833 1.5 12.862V6.638c0-1.97 1.405-3.718 3.413-3.979Z" />
       <path d="M15.75 7.5c-1.376 0-2.739.057-4.086.169C10.124 7.797 9 9.103 9 10.609v4.285c0 1.507 1.128 2.814 2.67 2.94 1.243.102 2.5.157 3.768.165l2.782 2.781a.75.75 0 0 0 1.28-.53v-2.39l.33-.026c1.542-.125 2.67-1.433 2.67-2.94v-4.286c0-1.505-1.125-2.811-2.664-2.94A49.392 49.392 0 0 0 15.75 7.5Z" />
     </svg>
@@ -23,29 +38,15 @@ function MessageBubbleIcon() {
 
 function CloseIcon() {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className="w-5 h-5"
-    >
-      <path
-        fillRule="evenodd"
-        d="M5.47 5.47a.75.75 0 0 1 1.06 0L12 10.94l5.47-5.47a.75.75 0 1 1 1.06 1.06L13.06 12l5.47 5.47a.75.75 0 1 1-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 0 1-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 0 1 0-1.06Z"
-        clipRule="evenodd"
-      />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+      <path fillRule="evenodd" d="M5.47 5.47a.75.75 0 0 1 1.06 0L12 10.94l5.47-5.47a.75.75 0 1 1 1.06 1.06L13.06 12l5.47 5.47a.75.75 0 1 1-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 0 1-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
     </svg>
   );
 }
 
 function SendIcon() {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className="w-4 h-4"
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
       <path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" />
     </svg>
   );
@@ -63,11 +64,14 @@ function TypingIndicator() {
   );
 }
 
-interface ChatProps {
-  onCalendarChange?: () => void;
-}
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
-export function Chat({ onCalendarChange }: ChatProps) {
+export const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
+  { onCalendarChange, preferences },
+  ref,
+) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -80,20 +84,11 @@ export function Chat({ onCalendarChange }: ChatProps) {
   }, [messages, streaming]);
 
   useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
   }, [open]);
 
-  // Auto-resize textarea
-  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setInput(e.target.value);
-    e.target.style.height = "auto";
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
-  }
-
-  async function send() {
-    const text = input.trim();
+  // Core send logic — accepts text directly to avoid stale closure issues
+  async function sendText(text: string) {
     if (!text || streaming) return;
 
     const userMsg: Message = { role: "user", content: text };
@@ -108,7 +103,7 @@ export function Chat({ onCalendarChange }: ChatProps) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages: history, preferences }),
       });
 
       if (!res.ok || !res.body) {
@@ -123,7 +118,6 @@ export function Chat({ onCalendarChange }: ChatProps) {
       const decoder = new TextDecoder();
       let accumulated = "";
 
-      // Seed the assistant message so it appears immediately
       setMessages([...history, { role: "assistant", content: "" }]);
 
       while (true) {
@@ -138,10 +132,25 @@ export function Chat({ onCalendarChange }: ChatProps) {
     }
   }
 
+  // Expose imperative API for programmatic message sending
+  useImperativeHandle(ref, () => ({
+    sendMessage(text: string) {
+      setOpen(true);
+      // Defer until open animation settles, then send
+      setTimeout(() => sendText(text), 80);
+    },
+  }));
+
+  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    e.target.style.height = "auto";
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      send();
+      sendText(input.trim());
     }
   }
 
@@ -210,7 +219,6 @@ export function Chat({ onCalendarChange }: ChatProps) {
           ))}
 
           {showTypingIndicator && <TypingIndicator />}
-
           <div ref={bottomRef} />
         </div>
 
@@ -228,7 +236,7 @@ export function Chat({ onCalendarChange }: ChatProps) {
             style={{ minHeight: "38px" }}
           />
           <button
-            onClick={send}
+            onClick={() => sendText(input.trim())}
             disabled={!input.trim() || streaming}
             className="shrink-0 w-9 h-9 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-colors"
           >
@@ -247,4 +255,4 @@ export function Chat({ onCalendarChange }: ChatProps) {
       </button>
     </>
   );
-}
+});

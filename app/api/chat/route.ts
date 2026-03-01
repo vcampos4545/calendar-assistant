@@ -2,12 +2,16 @@ import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { TOOLS, executeTool } from "@/lib/calendarTools";
+import {
+  buildPreferencesContext,
+  type UserPreferences,
+} from "@/lib/preferences";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MAX_TOOL_ITERATIONS = 5;
+const MAX_TOOL_ITERATIONS = 10;
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(preferences?: UserPreferences): string {
   const now = new Date();
   const today = now.toLocaleDateString("en-US", {
     weekday: "long",
@@ -57,13 +61,16 @@ Checking weather:
 Full trip planning workflow (uses 3 tool calls, fits within the 5-call budget):
 1. get_events → find the trip on the calendar (dates, destination).
 2. search_flights → show flight options with booking links.
-3. get_weather_forecast → show weather summary and packing list.`;
+3. get_weather_forecast → show weather summary and packing list.${preferences ? buildPreferencesContext(preferences) : ""}`;
 }
 
 export async function POST(req: NextRequest) {
   const [session, body] = await Promise.all([auth(), req.json()]);
 
-  const { messages } = body;
+  const { messages, preferences } = body as {
+    messages: unknown;
+    preferences?: UserPreferences;
+  };
   if (!messages || !Array.isArray(messages)) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
   }
@@ -71,7 +78,7 @@ export async function POST(req: NextRequest) {
   const accessToken = session?.accessToken ?? null;
 
   const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt() },
+    { role: "system", content: buildSystemPrompt(preferences) },
     ...messages,
   ];
 
