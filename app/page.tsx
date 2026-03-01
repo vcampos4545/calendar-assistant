@@ -7,6 +7,11 @@ import { WeekView, type CalendarEvent } from "./components/WeekView";
 import { PreferencesPanel } from "./components/PreferencesPanel";
 import { LandingPage } from "./components/LandingPage";
 import {
+  AnalyticsPanel,
+  computeAnalytics,
+  type AnalyticsStats,
+} from "./components/AnalyticsPanel";
+import {
   DEFAULT_PREFERENCES,
   loadPreferences,
   savePreferences,
@@ -66,6 +71,14 @@ function SlidersIcon() {
   );
 }
 
+function ChartBarIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+      <path d="M18.375 2.25c-1.035 0-1.875.84-1.875 1.875v15.75c0 1.035.84 1.875 1.875 1.875h.75c1.035 0 1.875-.84 1.875-1.875V4.125c0-1.036-.84-1.875-1.875-1.875h-.75ZM9.75 8.625c0-1.036.84-1.875 1.875-1.875h.75c1.036 0 1.875.84 1.875 1.875v11.25c0 1.035-.84 1.875-1.875 1.875h-.75a1.875 1.875 0 0 1-1.875-1.875V8.625ZM3 13.125c0-1.036.84-1.875 1.875-1.875h.75c1.036 0 1.875.84 1.875 1.875v6.75c0 1.035-.84 1.875-1.875 1.875h-.75A1.875 1.875 0 0 1 3 19.875v-6.75Z" />
+    </svg>
+  );
+}
+
 function ChevronLeft() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
@@ -100,10 +113,10 @@ function SidebarTab({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+      className={`w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold border-l-2 transition-all ${
         active
-          ? "border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400"
-          : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:border-zinc-300 dark:hover:border-zinc-600"
+          ? "border-blue-600 text-blue-600 bg-blue-50/70 dark:text-blue-400 dark:border-blue-400 dark:bg-blue-950/20"
+          : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
       }`}
     >
       {icon}
@@ -116,7 +129,7 @@ function SidebarTab({
 // Page
 // ---------------------------------------------------------------------------
 
-type ActiveTab = "calendar" | "preferences";
+type ActiveTab = "calendar" | "analytics" | "preferences";
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -126,6 +139,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>("calendar");
+
+  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsStats | null>(null);
 
   const [savedPrefs, setSavedPrefs] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [draftPrefs, setDraftPrefs] = useState<UserPreferences>(DEFAULT_PREFERENCES);
@@ -152,6 +167,19 @@ export default function Home() {
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, weekOffset, refreshKey]);
+
+  // Compute analytics once when the tab is first opened (after events load)
+  useEffect(() => {
+    if (activeTab === "analytics" && !loading && analyticsStats === null) {
+      setAnalyticsStats(computeAnalytics(events, weekStart));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, loading, analyticsStats]);
+
+  // Reset saved analytics whenever the viewed week changes
+  useEffect(() => {
+    setAnalyticsStats(null);
+  }, [weekOffset]);
 
   function handleSavePrefs() {
     savePreferences(draftPrefs);
@@ -242,13 +270,19 @@ export default function Home() {
 
           {/* ── Sidebar ── */}
           <aside className="w-72 shrink-0 flex flex-col border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 min-h-0">
-            {/* Tab row */}
-            <div className="flex shrink-0 border-b border-zinc-200 dark:border-zinc-800">
+            {/* Tab nav — vertical */}
+            <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 py-1">
               <SidebarTab
                 active={activeTab === "calendar"}
                 onClick={() => setActiveTab("calendar")}
                 icon={<CalendarIcon />}
                 label="Calendar"
+              />
+              <SidebarTab
+                active={activeTab === "analytics"}
+                onClick={() => setActiveTab("analytics")}
+                icon={<ChartBarIcon />}
+                label="Analytics"
               />
               <SidebarTab
                 active={activeTab === "preferences"}
@@ -272,6 +306,16 @@ export default function Home() {
           <main className="flex-1 overflow-hidden min-w-0">
             {activeTab === "calendar" && isAuthenticated && (
               <WeekView weekStart={weekStart} events={events} loading={loading} />
+            )}
+            {activeTab === "analytics" && analyticsStats && (
+              <AnalyticsPanel stats={analyticsStats} />
+            )}
+            {activeTab === "analytics" && !analyticsStats && (
+              <div className="h-full flex items-center justify-center">
+                <p className="text-sm text-zinc-400 dark:text-zinc-500">
+                  {loading ? "Loading events…" : "Computing…"}
+                </p>
+              </div>
             )}
             {activeTab === "preferences" && (
               <PreferencesPanel
