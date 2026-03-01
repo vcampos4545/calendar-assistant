@@ -1,5 +1,6 @@
 import { google, calendar_v3 } from "googleapis";
 import type OpenAI from "openai";
+import { makeGoogleAuth } from "./googleAuth";
 
 // ---------------------------------------------------------------------------
 // Tool definitions (passed to OpenAI)
@@ -366,7 +367,7 @@ async function getFreeSlots(
   endDateStr: string,
   durationMinutes: number,
 ) {
-  const oauth2Client = makeOAuthClient(accessToken);
+  const oauth2Client = makeGoogleAuth(accessToken);
   const calApi = google.calendar({ version: "v3", auth: oauth2Client });
 
   const timeMin = new Date(`${startDateStr}T00:00:00`).toISOString();
@@ -497,7 +498,7 @@ async function getEvents(
 ) {
   const calApi = google.calendar({
     version: "v3",
-    auth: makeOAuthClient(accessToken),
+    auth: makeGoogleAuth(accessToken),
   });
 
   const res = await calApi.events.list({
@@ -569,7 +570,7 @@ async function createCalendarEvent(
 ) {
   const calApi = google.calendar({
     version: "v3",
-    auth: makeOAuthClient(accessToken),
+    auth: makeGoogleAuth(accessToken),
   });
 
   const requestBody: calendar_v3.Schema$Event = {
@@ -621,7 +622,7 @@ async function updateCalendarEvent(
 ) {
   const calApi = google.calendar({
     version: "v3",
-    auth: makeOAuthClient(accessToken),
+    auth: makeGoogleAuth(accessToken),
   });
 
   const patch: calendar_v3.Schema$Event = {};
@@ -664,23 +665,10 @@ async function updateCalendarEvent(
 async function deleteCalendarEvent(accessToken: string, eventId: string) {
   const calApi = google.calendar({
     version: "v3",
-    auth: makeOAuthClient(accessToken),
+    auth: makeGoogleAuth(accessToken),
   });
   await calApi.events.delete({ calendarId: "primary", eventId });
   return { success: true };
-}
-
-// ---------------------------------------------------------------------------
-// Shared helper
-// ---------------------------------------------------------------------------
-
-function makeOAuthClient(accessToken: string) {
-  const client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-  );
-  client.setCredentials({ access_token: accessToken });
-  return client;
 }
 
 // ---------------------------------------------------------------------------
@@ -963,7 +951,9 @@ function buildPackingList(
   const maxHigh = Math.max(...forecast.map((d) => d.high_f));
   const minLow = Math.min(...forecast.map((d) => d.low_f));
   const hasRain = forecast.some((d) => d.precipitation_in > 0.05);
-  const hasSnow = forecast.some((d) => d.weathercode >= 71 && d.weathercode <= 77);
+  const hasSnow = forecast.some(
+    (d) => d.weathercode >= 71 && d.weathercode <= 77,
+  );
   const hasThunder = forecast.some((d) => d.weathercode >= 95);
 
   // Temperature-based layers
@@ -1056,7 +1046,17 @@ async function getWeatherForecast(
 
   // Strip weathercode from the returned forecast (it's internal)
   const displayForecast = forecast.map(
-    ({ weathercode: _wc, ...rest }: { weathercode: number; date: string; condition: string; high_f: number; low_f: number; precipitation_in: number }) => rest,
+    ({
+      weathercode: _wc,
+      ...rest
+    }: {
+      weathercode: number;
+      date: string;
+      condition: string;
+      high_f: number;
+      low_f: number;
+      precipitation_in: number;
+    }) => rest,
   );
 
   return {

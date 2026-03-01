@@ -1,15 +1,7 @@
 import { auth } from "@/auth";
 import { google } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
-
-function makeOAuth(token: string) {
-  const client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-  );
-  client.setCredentials({ access_token: token });
-  return client;
-}
+import { makeGoogleAuth } from "@/lib/googleAuth";
 
 export async function PATCH(
   req: NextRequest,
@@ -22,10 +14,7 @@ export async function PATCH(
   const { id } = await params;
   const body = (await req.json()) as Record<string, unknown>;
 
-  const calendar = google.calendar({
-    version: "v3",
-    auth: makeOAuth(session.accessToken),
-  });
+  const calendar = google.calendar({ version: "v3", auth: makeGoogleAuth(session.accessToken) });
 
   const response = await calendar.events.patch({
     calendarId: "primary",
@@ -46,10 +35,7 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const calendar = google.calendar({
-    version: "v3",
-    auth: makeOAuth(session.accessToken),
-  });
+  const calendar = google.calendar({ version: "v3", auth: makeGoogleAuth(session.accessToken) });
 
   await calendar.events.delete({ calendarId: "primary", eventId: id });
 

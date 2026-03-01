@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { google } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
+import { makeGoogleAuth } from "@/lib/googleAuth";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -10,14 +11,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json()) as Record<string, unknown>;
-
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-  );
-  oauth2Client.setCredentials({ access_token: session.accessToken });
-
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const calendar = google.calendar({ version: "v3", auth: makeGoogleAuth(session.accessToken) });
 
   const response = await calendar.events.insert({
     calendarId: "primary",
@@ -41,17 +35,11 @@ export async function GET(req: NextRequest) {
   if (!start || !end) {
     return NextResponse.json(
       { error: "Missing required query params: start, end (YYYY-MM-DD)" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-  oauth2Client.setCredentials({ access_token: session.accessToken });
-
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const calendar = google.calendar({ version: "v3", auth: makeGoogleAuth(session.accessToken) });
 
   const response = await calendar.events.list({
     calendarId: "primary",
