@@ -61,7 +61,7 @@ Checking weather:
 - Summarize conditions day-by-day, then present the packing list returned by the tool.
 - If the tool returns an error about date range, tell the user the forecast is not available yet and offer general seasonal advice instead.
 
-Full trip planning workflow (uses 3 tool calls, fits within the 5-call budget):
+Full trip planning workflow:
 1. get_events → find the trip on the calendar (dates, destination).
 2. search_flights → show flight options with booking links.
 3. get_weather_forecast → show weather summary and packing list.${preferences ? buildPreferencesContext(preferences) : ""}`;
@@ -94,7 +94,8 @@ export async function POST(req: NextRequest) {
     "delete_calendar_event",
   ]);
   let calendarModified = false;
-  const pendingDrafts: Array<{ to?: string; subject: string; body: string }> = [];
+  const pendingDrafts: Array<{ to?: string; subject: string; body: string }> =
+    [];
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await openai.chat.completions.create({
@@ -126,7 +127,11 @@ export async function POST(req: NextRequest) {
           subject: string;
           body: string;
         };
-        pendingDrafts.push({ to: args.to, subject: args.subject, body: args.body });
+        pendingDrafts.push({
+          to: args.to,
+          subject: args.subject,
+          body: args.body,
+        });
       }
     }
 
@@ -136,7 +141,7 @@ export async function POST(req: NextRequest) {
         role: "tool" as const,
         tool_call_id: toolCall.id,
         content: JSON.stringify(await executeTool(toolCall, accessToken)),
-      }))
+      })),
     );
 
     chatMessages.push(...toolResults);
