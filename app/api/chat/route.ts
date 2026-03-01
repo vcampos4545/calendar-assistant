@@ -11,20 +11,21 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const MAX_TOOL_ITERATIONS = 10;
 
-function buildSystemPrompt(preferences?: UserPreferences): string {
+function buildSystemPrompt(preferences?: UserPreferences, timezone?: string): string {
   const now = new Date();
+  const tz = timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today = now.toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
+    timeZone: tz,
   });
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  return `You are a helpful calendar assistant. Today is ${today}. The local timezone is ${timeZone}.
+  return `You are a helpful calendar assistant. Today is ${today}. The local timezone is ${tz}.
 
 FINDING FREE TIME
-When a user asks about availability or finding time to schedule something, call get_free_slots first — never guess. Default duration is 30 minutes if unspecified.
+When a user asks about availability or finding time to schedule something, call get_free_slots first — never guess. Default duration is 30 minutes if unspecified. Always pass timezone="${tz}" when calling get_free_slots.
 
 DATE VALIDATION (IMPORTANT)
 Before passing any date to a tool, verify it is a real calendar date:
@@ -70,9 +71,10 @@ Full trip planning workflow:
 export async function POST(req: NextRequest) {
   const [session, body] = await Promise.all([auth(), req.json()]);
 
-  const { messages, preferences } = body as {
+  const { messages, preferences, timezone } = body as {
     messages: unknown;
     preferences?: UserPreferences;
+    timezone?: string;
   };
   if (!messages || !Array.isArray(messages)) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest) {
   const accessToken = session?.accessToken ?? null;
 
   const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(preferences) },
+    { role: "system", content: buildSystemPrompt(preferences, timezone) },
     ...messages,
   ];
 

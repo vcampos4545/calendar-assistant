@@ -133,8 +133,13 @@ export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
             description:
               "Desired slot length in minutes. Defaults to 30 if the user didn't specify.",
           },
+          timezone: {
+            type: "string",
+            description:
+              "IANA timezone identifier (e.g. 'America/New_York'). Always pass this — the system prompt provides the user's timezone.",
+          },
         },
-        required: ["start_date", "end_date"],
+        required: ["start_date", "end_date", "timezone"],
       },
     },
   },
@@ -310,7 +315,8 @@ export async function executeTool(
         const startDate = args.start_date as string;
         const endDate = args.end_date as string;
         const duration = (args.duration_minutes as number | undefined) ?? 30;
-        return getFreeSlots(accessToken!, startDate, endDate, duration);
+        const timezone = (args.timezone as string | undefined) ?? "UTC";
+        return getFreeSlots(accessToken!, startDate, endDate, duration, timezone);
       }
 
       case "prepare_email_draft":
@@ -366,7 +372,9 @@ async function getFreeSlots(
   startDateStr: string,
   endDateStr: string,
   durationMinutes: number,
+  timezone: string,
 ) {
+  console.log("getFreeSlots()", startDateStr, endDateStr, timezone);
   const oauth2Client = makeGoogleAuth(accessToken);
   const calApi = google.calendar({ version: "v3", auth: oauth2Client });
 
@@ -388,6 +396,7 @@ async function getFreeSlots(
     startDateStr,
     endDateStr,
     durationMinutes,
+    timezone,
   );
   const capped = slots.slice(0, MAX_SLOTS_RETURNED);
 
@@ -404,27 +413,78 @@ async function getFreeSlots(
   };
 }
 
-// Returns a YYYY-MM-DD string in local time (avoids UTC offset shifting the date)
-function toLocalDateStr(date: Date): string {
+// Returns the UTC offset in minutes for the given IANA timezone at the given instant.
+// e.g. tzOffsetMin("America/New_York", date) in winter → -300
+function tzOffsetMin(timezone: string, date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (t: string) =>
+    parseInt(parts.find((p) => p.type === t)?.value ?? "0");
+  // hour12:false can return "24" for midnight — normalise to 0
+  const localAsUtcMs = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour") % 24,
+    get("minute"),
+    get("second"),
+  );
+  return (localAsUtcMs - date.getTime()) / 60_000;
+}
+
+// Returns a UTC Date representing `hour:00` on `dateStr` in `timezone`.
+// Uses noon UTC as the reference point to safely straddle DST boundaries.
+function dateAtHourInTZ(dateStr: string, hour: number, timezone: string): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  const offsetMin = tzOffsetMin(timezone, noonUtc);
+  // utc_ms = local_ms - offset  (local "hour:00" expressed as if it were UTC, minus offset)
+  return new Date(Date.UTC(year, month - 1, day, hour, 0, 0) - offsetMin * 60_000);
+}
+
+// Increments a YYYY-MM-DD string by `days` days (UTC-safe, no server-timezone dependence).
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + days));
   return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
+    next.getUTCFullYear(),
+    String(next.getUTCMonth() + 1).padStart(2, "0"),
+    String(next.getUTCDate()).padStart(2, "0"),
   ].join("-");
 }
 
-// Returns an ISO 8601 string in the server's local time with the UTC offset attached
-// (e.g. "2026-03-01T09:00:00-05:00" instead of "2026-03-01T14:00:00.000Z").
-// This lets the LLM read the time value directly without needing to convert from UTC.
-function toLocalISOString(date: Date): string {
+// Formats a Date as an ISO 8601 string in the given IANA timezone
+// (e.g. "2026-03-01T09:00:00-05:00"). The LLM can read the hour directly.
+function toTZISOString(date: Date, timezone: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  const offsetMin = -date.getTimezoneOffset();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (t: string) =>
+    parseInt(parts.find((p) => p.type === t)?.value ?? "0");
+  const h = get("hour") % 24;
+  const offsetMin = tzOffsetMin(timezone, date);
   const sign = offsetMin >= 0 ? "+" : "-";
-  const absMin = Math.abs(offsetMin);
+  const absOff = Math.abs(Math.round(offsetMin));
   return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
-    `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`
+    `${get("year")}-${pad(get("month"))}-${pad(get("day"))}` +
+    `T${pad(h)}:${pad(get("minute"))}:${pad(get("second"))}` +
+    `${sign}${pad(Math.floor(absOff / 60))}:${pad(absOff % 60)}`
   );
 }
 
@@ -433,20 +493,15 @@ function computeFreeSlots(
   startDateStr: string,
   endDateStr: string,
   durationMinutes: number,
+  timezone: string,
 ): FreeSlot[] {
   const slots: FreeSlot[] = [];
-  const startDay = new Date(`${startDateStr}T00:00:00`);
-  const endDay = new Date(`${endDateStr}T00:00:00`);
 
-  const current = new Date(startDay);
-  while (current <= endDay) {
-    const workStart = new Date(current);
-    workStart.setHours(WORK_START_HOUR, 0, 0, 0);
-    const workEnd = new Date(current);
-    workEnd.setHours(WORK_END_HOUR, 0, 0, 0);
+  let dateStr = startDateStr;
+  while (dateStr <= endDateStr) {
+    const workStart = dateAtHourInTZ(dateStr, WORK_START_HOUR, timezone);
+    const workEnd = dateAtHourInTZ(dateStr, WORK_END_HOUR, timezone);
 
-    // Use local date string to correctly match all-day events (avoids UTC offset shifting the day)
-    const dateStr = toLocalDateStr(current);
     const hasAllDayBlock = events.some((e) => e.start?.date === dateStr);
 
     if (!hasAllDayBlock) {
@@ -474,8 +529,8 @@ function computeFreeSlots(
             (blockStart.getTime() - freeFrom.getTime()) / 60_000;
           if (gapMinutes >= durationMinutes) {
             slots.push({
-              start: toLocalISOString(freeFrom),
-              end: toLocalISOString(blockStart),
+              start: toTZISOString(freeFrom, timezone),
+              end: toTZISOString(blockStart, timezone),
               available_minutes: Math.floor(gapMinutes),
             });
           }
@@ -488,15 +543,15 @@ function computeFreeSlots(
         const gapMinutes = (workEnd.getTime() - freeFrom.getTime()) / 60_000;
         if (gapMinutes >= durationMinutes) {
           slots.push({
-            start: toLocalISOString(freeFrom),
-            end: toLocalISOString(workEnd),
+            start: toTZISOString(freeFrom, timezone),
+            end: toTZISOString(workEnd, timezone),
             available_minutes: Math.floor(gapMinutes),
           });
         }
       }
     }
 
-    current.setDate(current.getDate() + 1);
+    dateStr = addDays(dateStr, 1);
   }
   return slots;
 }
