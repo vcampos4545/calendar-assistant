@@ -1,4 +1,4 @@
-import { google, calendar_v3 } from "googleapis";
+import { calendar_v3, google } from "googleapis";
 import type OpenAI from "openai";
 import { makeGoogleAuth } from "./googleAuth";
 
@@ -367,6 +367,12 @@ async function getFreeSlots(
   endDateStr: string,
   durationMinutes: number,
 ) {
+  console.log(
+    "\ngetFreeSlots() startDateStr:",
+    startDateStr,
+    "endDateStr:",
+    endDateStr,
+  );
   const oauth2Client = makeGoogleAuth(accessToken);
   const calApi = google.calendar({ version: "v3", auth: oauth2Client });
 
@@ -411,6 +417,21 @@ function toLocalDateStr(date: Date): string {
     String(date.getMonth() + 1).padStart(2, "0"),
     String(date.getDate()).padStart(2, "0"),
   ].join("-");
+}
+
+// Returns an ISO 8601 string in the server's local time with the UTC offset attached
+// (e.g. "2026-03-01T09:00:00-05:00" instead of "2026-03-01T14:00:00.000Z").
+// This lets the LLM read the time value directly without needing to convert from UTC.
+function toLocalISOString(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offsetMin = -date.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(offsetMin);
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`
+  );
 }
 
 function computeFreeSlots(
@@ -459,8 +480,8 @@ function computeFreeSlots(
             (blockStart.getTime() - freeFrom.getTime()) / 60_000;
           if (gapMinutes >= durationMinutes) {
             slots.push({
-              start: freeFrom.toISOString(),
-              end: blockStart.toISOString(),
+              start: toLocalISOString(freeFrom),
+              end: toLocalISOString(blockStart),
               available_minutes: Math.floor(gapMinutes),
             });
           }
@@ -473,8 +494,8 @@ function computeFreeSlots(
         const gapMinutes = (workEnd.getTime() - freeFrom.getTime()) / 60_000;
         if (gapMinutes >= durationMinutes) {
           slots.push({
-            start: freeFrom.toISOString(),
-            end: workEnd.toISOString(),
+            start: toLocalISOString(freeFrom),
+            end: toLocalISOString(workEnd),
             available_minutes: Math.floor(gapMinutes),
           });
         }
@@ -484,6 +505,7 @@ function computeFreeSlots(
     current.setDate(current.getDate() + 1);
   }
 
+  console.log("free slots: ", slots);
   return slots;
 }
 
