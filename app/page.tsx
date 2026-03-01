@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Chat, type ChatHandle } from "./components/Chat";
 import { WeekView, type CalendarEvent } from "./components/WeekView";
 import { PreferencesPanel } from "./components/PreferencesPanel";
+import { LandingPage } from "./components/LandingPage";
 import {
   DEFAULT_PREFERENCES,
   loadPreferences,
@@ -169,6 +170,11 @@ export default function Home() {
     );
   }
 
+  // Show landing page to unauthenticated visitors
+  if (status !== "loading" && !session) {
+    return <LandingPage />;
+  }
+
   const isAuthenticated = status === "authenticated" && !!session;
 
   return (
@@ -232,18 +238,7 @@ export default function Home() {
       )}
 
       {/* ── Body ── */}
-      {!session && status !== "loading" ? (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <h2 className="text-lg font-medium text-zinc-700 dark:text-zinc-300 mb-2">Connect your Google Calendar</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">Sign in with Google to view and manage your calendar.</p>
-            <button onClick={() => signIn("google")} className="px-5 py-2.5 rounded bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors">
-              Sign in with Google
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex-1 flex overflow-hidden min-h-0">
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
           {/* ── Sidebar ── */}
           <aside className="w-72 shrink-0 flex flex-col border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 min-h-0">
@@ -288,7 +283,6 @@ export default function Home() {
             )}
           </main>
         </div>
-      )}
     </div>
   );
 }

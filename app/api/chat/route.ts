@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
 
     // Track mutations and capture any email drafts
     for (const toolCall of choice.message.tool_calls) {
+      if (toolCall.type !== "function") continue;
       if (MUTATING_TOOLS.has(toolCall.function.name)) {
         calendarModified = true;
       }
