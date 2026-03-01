@@ -367,12 +367,6 @@ async function getFreeSlots(
   endDateStr: string,
   durationMinutes: number,
 ) {
-  console.log(
-    "\ngetFreeSlots() startDateStr:",
-    startDateStr,
-    "endDateStr:",
-    endDateStr,
-  );
   const oauth2Client = makeGoogleAuth(accessToken);
   const calApi = google.calendar({ version: "v3", auth: oauth2Client });
 
@@ -504,8 +498,6 @@ function computeFreeSlots(
 
     current.setDate(current.getDate() + 1);
   }
-
-  console.log("free slots: ", slots);
   return slots;
 }
 
