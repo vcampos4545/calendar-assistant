@@ -184,6 +184,35 @@ export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "prepare_email_draft",
+      description:
+        "Prepare an email draft for the user to review. " +
+        "Call this after writing an email draft in your response — it will display a 'Save to Gmail Drafts' button in the UI so the user can save it with one click. " +
+        "Does not send or save anything automatically.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {
+            type: "string",
+            description:
+              "Recipient email address or display name (e.g. 'joe@company.com' or 'Joe Smith <joe@company.com>'). Omit if unknown.",
+          },
+          subject: {
+            type: "string",
+            description: "Email subject line.",
+          },
+          body: {
+            type: "string",
+            description: "Full plain-text email body.",
+          },
+        },
+        required: ["subject", "body"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_weather_forecast",
       description:
         "Get a daily weather forecast for a destination city over a date range. " +
@@ -235,6 +264,7 @@ export async function executeTool(
     "update_calendar_event",
     "delete_calendar_event",
     "get_free_slots",
+    // prepare_email_draft intentionally omitted — it needs no Google auth
   ]);
 
   if (!accessToken && CALENDAR_TOOLS.has(name)) {
@@ -281,6 +311,13 @@ export async function executeTool(
         const duration = (args.duration_minutes as number | undefined) ?? 30;
         return getFreeSlots(accessToken!, startDate, endDate, duration);
       }
+
+      case "prepare_email_draft":
+        return prepareEmailDraft(
+          args.to as string | undefined,
+          args.subject as string,
+          args.body as string,
+        );
 
       case "search_flights":
         return searchFlights(
@@ -644,6 +681,27 @@ function makeOAuthClient(accessToken: string) {
   );
   client.setCredentials({ access_token: accessToken });
   return client;
+}
+
+// ---------------------------------------------------------------------------
+// prepare_email_draft implementation
+// ---------------------------------------------------------------------------
+
+// Does not call any API — simply returns the structured draft data so the
+// route can surface it via the X-Draft-Data header and the UI can render
+// a "Save to Gmail Drafts" button for the user to confirm.
+function prepareEmailDraft(
+  to: string | undefined,
+  subject: string,
+  body: string,
+) {
+  return {
+    prepared: true,
+    to: to ?? null,
+    subject,
+    body,
+    note: "A 'Save to Gmail Drafts' button will appear in the chat for the user to confirm.",
+  };
 }
 
 // ---------------------------------------------------------------------------

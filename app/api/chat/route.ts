@@ -43,7 +43,10 @@ DELETING EVENTS
 When the user asks to delete an event, call get_events to find it, confirm with the user ("Are you sure you want to delete [event name]?"), then call delete_calendar_event only after they confirm.
 
 DRAFTING EMAILS
-When a user asks you to draft an email, write the full draft directly in your response.
+When a user asks you to draft an email:
+1. Write the full draft in your response (To, Subject, and body) so they can read it.
+2. Call prepare_email_draft with the same to, subject, and body — this will show a "Save to Gmail Drafts" button in the UI so the user can save it with one click.
+If drafting multiple emails (e.g. one per person), write each draft in your response and call prepare_email_draft once per email.
 
 TRIP PLANNING
 When the user mentions a trip or you detect travel events in their calendar (multi-day events, events in a different city, events titled "Trip to...", "Flight", etc.), proactively offer flight and weather help.
@@ -91,6 +94,7 @@ export async function POST(req: NextRequest) {
     "delete_calendar_event",
   ]);
   let calendarModified = false;
+  const pendingDrafts: Array<{ to?: string; subject: string; body: string }> = [];
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await openai.chat.completions.create({
@@ -110,10 +114,18 @@ export async function POST(req: NextRequest) {
     // Append the assistant's tool-call message to history
     chatMessages.push(choice.message);
 
-    // Track whether any mutating tool was called
+    // Track mutations and capture any email drafts
     for (const toolCall of choice.message.tool_calls) {
       if (MUTATING_TOOLS.has(toolCall.function.name)) {
         calendarModified = true;
+      }
+      if (toolCall.function.name === "prepare_email_draft") {
+        const args = JSON.parse(toolCall.function.arguments) as {
+          to?: string;
+          subject: string;
+          body: string;
+        };
+        pendingDrafts.push({ to: args.to, subject: args.subject, body: args.body });
       }
     }
 
@@ -149,10 +161,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return new Response(readable, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "X-Calendar-Modified": calendarModified ? "true" : "false",
-    },
-  });
+  const responseHeaders: Record<string, string> = {
+    "Content-Type": "text/plain; charset=utf-8",
+    "X-Calendar-Modified": calendarModified ? "true" : "false",
+  };
+  if (pendingDrafts.length > 0) {
+    responseHeaders["X-Draft-Data"] = encodeURIComponent(
+      JSON.stringify(pendingDrafts),
+    );
+  }
+
+  return new Response(readable, { headers: responseHeaders });
 }

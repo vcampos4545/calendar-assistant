@@ -9,9 +9,20 @@ import {
 } from "react";
 import type { UserPreferences } from "@/lib/preferences";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface DraftData {
+  to?: string;
+  subject: string;
+  body: string;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
+  drafts?: DraftData[];
 }
 
 export interface ChatHandle {
@@ -22,6 +33,10 @@ interface ChatProps {
   onCalendarChange?: () => void;
   preferences?: UserPreferences;
 }
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
 
 function SendIcon() {
   return (
@@ -42,6 +57,114 @@ function TypingIndicator() {
     </div>
   );
 }
+
+function DraftCard({ draft }: { draft: DraftData }) {
+  const [dismissed, setDismissed] = useState(false);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  if (dismissed) return null;
+
+  async function handleSave() {
+    setStatus("saving");
+    try {
+      const res = await fetch("/api/gmail/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        setErrorMsg(data.error ?? "Failed to save");
+        setStatus("error");
+        return;
+      }
+      setStatus("saved");
+    } catch {
+      setErrorMsg("Network error");
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="mt-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden text-xs">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60">
+        <div className="flex items-center gap-1.5">
+          {/* Envelope icon */}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-zinc-400">
+            <path d="M3 4a2 2 0 0 0-2 2v1.161l8.441 4.221a1.25 1.25 0 0 0 1.118 0L19 7.162V6a2 2 0 0 0-2-2H3Z" />
+            <path d="m19 8.839-7.77 3.885a2.75 2.75 0 0 1-2.46 0L1 8.839V14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.839Z" />
+          </svg>
+          <span className="font-semibold text-zinc-600 dark:text-zinc-300">Email Draft</span>
+        </div>
+        {status !== "saved" && (
+          <button
+            onClick={() => setDismissed(true)}
+            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors leading-none"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Draft metadata */}
+      <div className="px-3 py-2 space-y-0.5 text-zinc-500 dark:text-zinc-400">
+        {draft.to && (
+          <p>
+            <span className="font-medium text-zinc-600 dark:text-zinc-300">To:</span>{" "}
+            {draft.to}
+          </p>
+        )}
+        <p>
+          <span className="font-medium text-zinc-600 dark:text-zinc-300">Subject:</span>{" "}
+          {draft.subject}
+        </p>
+      </div>
+
+      {/* Action footer */}
+      <div className="px-3 py-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+        {status === "saved" ? (
+          <>
+            <span className="text-green-600 dark:text-green-400 font-medium">Saved to Gmail Drafts</span>
+            <a
+              href="https://mail.google.com/mail/u/0/#drafts"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Open →
+            </a>
+          </>
+        ) : (
+          <>
+            {status === "error" && (
+              <span className="text-red-500 dark:text-red-400 truncate">{errorMsg}</span>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={status === "saving"}
+              className="shrink-0 px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {status === "saving" ? "Saving…" : "Save to Gmail Drafts"}
+            </button>
+            <button
+              onClick={() => setDismissed(true)}
+              className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+            >
+              Dismiss
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 
 export const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
   { onCalendarChange, preferences },
@@ -84,6 +207,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
       }
 
       const calendarModified = res.headers.get("X-Calendar-Modified") === "true";
+      const draftHeader = res.headers.get("X-Draft-Data");
+      const drafts: DraftData[] = draftHeader
+        ? (JSON.parse(decodeURIComponent(draftHeader)) as DraftData[])
+        : [];
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
@@ -95,6 +223,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
         if (done) break;
         accumulated += decoder.decode(value, { stream: true });
         setMessages([...history, { role: "assistant", content: accumulated }]);
+      }
+
+      // Attach draft cards to the final assistant message
+      if (drafts.length > 0) {
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last?.role === "assistant") {
+            copy[copy.length - 1] = { ...last, drafts };
+          }
+          return copy;
+        });
       }
 
       if (calendarModified) onCalendarChange?.();
@@ -157,14 +297,19 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
             key={i}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words ${
-                msg.role === "user"
-                  ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-sm"
-                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-sm"
-              }`}
-            >
-              {msg.content}
+            <div className="max-w-[88%] flex flex-col">
+              <div
+                className={`rounded-2xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words ${
+                  msg.role === "user"
+                    ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-sm"
+                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-sm"
+                }`}
+              >
+                {msg.content}
+              </div>
+              {msg.drafts?.map((draft, j) => (
+                <DraftCard key={j} draft={draft} />
+              ))}
             </div>
           </div>
         ))}
