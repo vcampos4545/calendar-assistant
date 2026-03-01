@@ -137,6 +137,79 @@ export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_flights",
+      description:
+        "Search for available one-way or round-trip flights between two airports or cities. " +
+        "Returns up to 5 options with airline, departure/arrival times, duration, stops, price, " +
+        "and a Kayak booking link. Pass IATA airport codes when known (e.g. 'JFK', 'NRT'); " +
+        "pass a city name otherwise and the tool will resolve it.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "string",
+            description:
+              "Departure airport IATA code or city name (e.g. 'SFO' or 'San Francisco').",
+          },
+          destination: {
+            type: "string",
+            description:
+              "Arrival airport IATA code or city name (e.g. 'NRT' or 'Tokyo').",
+          },
+          departure_date: {
+            type: "string",
+            description: "Outbound departure date, YYYY-MM-DD.",
+          },
+          return_date: {
+            type: "string",
+            description:
+              "Return date for round trips, YYYY-MM-DD. Omit for one-way.",
+          },
+          adults: {
+            type: "number",
+            description: "Number of adult passengers. Defaults to 1.",
+          },
+          currency: {
+            type: "string",
+            description: "Currency code, e.g. 'USD'. Defaults to 'USD'.",
+          },
+        },
+        required: ["origin", "destination", "departure_date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_weather_forecast",
+      description:
+        "Get a daily weather forecast for a destination city over a date range. " +
+        "Returns conditions, high/low temperatures, precipitation, and a packing list. " +
+        "Call this when the user asks what to expect weather-wise or what to pack for a trip.",
+      parameters: {
+        type: "object",
+        properties: {
+          city: {
+            type: "string",
+            description:
+              "Destination city name, e.g. 'Tokyo' or 'Paris, France'.",
+          },
+          start_date: {
+            type: "string",
+            description: "First day of the trip, YYYY-MM-DD.",
+          },
+          end_date: {
+            type: "string",
+            description: "Last day of the trip, YYYY-MM-DD.",
+          },
+        },
+        required: ["city", "start_date", "end_date"],
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -155,10 +228,19 @@ export async function executeTool(
   const { name, arguments: rawArgs } = toolCall.function;
   const args = JSON.parse(rawArgs) as Record<string, unknown>;
 
-  if (!accessToken) {
+  // Calendar tools require Google sign-in; travel tools do not
+  const CALENDAR_TOOLS = new Set([
+    "get_events",
+    "create_calendar_event",
+    "update_calendar_event",
+    "delete_calendar_event",
+    "get_free_slots",
+  ]);
+
+  if (!accessToken && CALENDAR_TOOLS.has(name)) {
     return {
       error:
-        "User is not signed in with Google. Cannot access Google services.",
+        "User is not signed in with Google. Cannot access Google Calendar.",
     };
   }
 
@@ -166,14 +248,14 @@ export async function executeTool(
     switch (name) {
       case "get_events":
         return getEvents(
-          accessToken,
+          accessToken!,
           args.start_date as string,
           args.end_date as string,
         );
 
       case "create_calendar_event":
         return createCalendarEvent(
-          accessToken,
+          accessToken!,
           args.summary as string,
           args.start_datetime as string,
           args.end_datetime as string,
@@ -182,7 +264,7 @@ export async function executeTool(
         );
 
       case "update_calendar_event":
-        return updateCalendarEvent(accessToken, args.event_id as string, {
+        return updateCalendarEvent(accessToken!, args.event_id as string, {
           summary: args.summary as string | undefined,
           start_datetime: args.start_datetime as string | undefined,
           end_datetime: args.end_datetime as string | undefined,
@@ -191,14 +273,31 @@ export async function executeTool(
         });
 
       case "delete_calendar_event":
-        return deleteCalendarEvent(accessToken, args.event_id as string);
+        return deleteCalendarEvent(accessToken!, args.event_id as string);
 
       case "get_free_slots": {
         const startDate = args.start_date as string;
         const endDate = args.end_date as string;
         const duration = (args.duration_minutes as number | undefined) ?? 30;
-        return getFreeSlots(accessToken, startDate, endDate, duration);
+        return getFreeSlots(accessToken!, startDate, endDate, duration);
       }
+
+      case "search_flights":
+        return searchFlights(
+          args.origin as string,
+          args.destination as string,
+          args.departure_date as string,
+          args.return_date as string | undefined,
+          (args.adults as number | undefined) ?? 1,
+          (args.currency as string | undefined) ?? "USD",
+        );
+
+      case "get_weather_forecast":
+        return getWeatherForecast(
+          args.city as string,
+          args.start_date as string,
+          args.end_date as string,
+        );
 
       default:
         return { error: `Unknown tool: ${name}` };
@@ -545,4 +644,366 @@ function makeOAuthClient(accessToken: string) {
   );
   client.setCredentials({ access_token: accessToken });
   return client;
+}
+
+// ---------------------------------------------------------------------------
+// search_flights implementation
+// ---------------------------------------------------------------------------
+
+// Module-level Amadeus token cache (valid for process lifetime)
+interface AmadeusTokenCache {
+  token: string;
+  expiresAt: number; // unix ms
+}
+let amadeusTokenCache: AmadeusTokenCache | null = null;
+
+async function getAmadeusToken(): Promise<string> {
+  const key = process.env.AMADEUS_API_KEY;
+  const secret = process.env.AMADEUS_API_SECRET;
+  if (!key || !secret) {
+    throw new Error(
+      "Amadeus API credentials are not configured (AMADEUS_API_KEY / AMADEUS_API_SECRET).",
+    );
+  }
+
+  // Return cached token if still valid (60s buffer)
+  if (amadeusTokenCache && amadeusTokenCache.expiresAt - 60_000 > Date.now()) {
+    return amadeusTokenCache.token;
+  }
+
+  const res = await fetch(
+    "https://test.api.amadeus.com/v1/security/oauth2/token",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: key,
+        client_secret: secret,
+      }),
+    },
+  );
+  if (!res.ok) throw new Error("Amadeus authentication failed.");
+  const data = await res.json();
+  amadeusTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+  return amadeusTokenCache.token;
+}
+
+// Resolve a city name to an IATA code using Amadeus Airport Search
+async function resolveIata(token: string, query: string): Promise<string> {
+  // Already an IATA code — 2-3 uppercase letters
+  if (/^[A-Z]{2,3}$/.test(query)) return query;
+
+  const params = new URLSearchParams({
+    keyword: query,
+    subType: "AIRPORT,CITY",
+    "page[limit]": "1",
+  });
+  const res = await fetch(
+    `https://test.api.amadeus.com/v1/reference-data/locations?${params}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const data = await res.json();
+  const code = data.data?.[0]?.iataCode;
+  if (!code) {
+    throw new Error(`Could not find an airport for "${query}".`);
+  }
+  return code as string;
+}
+
+// Convert Amadeus ISO 8601 duration (PT14H30M) to human-readable string
+function formatDuration(iso: string): string {
+  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+  if (!match) return iso;
+  const parts: string[] = [];
+  if (match[1]) parts.push(`${match[1]}h`);
+  if (match[2]) parts.push(`${match[2]}m`);
+  return parts.join(" ") || iso;
+}
+
+// Known carrier names for display
+const CARRIER_NAMES: Record<string, string> = {
+  AA: "American Airlines",
+  DL: "Delta",
+  UA: "United",
+  WN: "Southwest",
+  B6: "JetBlue",
+  AS: "Alaska Airlines",
+  F9: "Frontier",
+  NK: "Spirit",
+  G4: "Allegiant",
+  BA: "British Airways",
+  LH: "Lufthansa",
+  AF: "Air France",
+  KL: "KLM",
+  EK: "Emirates",
+  QR: "Qatar Airways",
+  SQ: "Singapore Airlines",
+  CX: "Cathay Pacific",
+  NH: "ANA",
+  JL: "Japan Airlines",
+  AC: "Air Canada",
+  VS: "Virgin Atlantic",
+};
+
+function buildKayakLink(
+  origin: string,
+  destination: string,
+  departureDate: string,
+  returnDate?: string,
+  adults = 1,
+): string {
+  const trip = returnDate
+    ? `${origin}-${destination}/${departureDate}/${returnDate}`
+    : `${origin}-${destination}/${departureDate}`;
+  return `https://www.kayak.com/flights/${trip}/${adults}adults`;
+}
+
+async function searchFlights(
+  origin: string,
+  destination: string,
+  departureDate: string,
+  returnDate?: string,
+  adults = 1,
+  currency = "USD",
+) {
+  const token = await getAmadeusToken();
+
+  // Resolve city names → IATA codes
+  const [originCode, destCode] = await Promise.all([
+    resolveIata(token, origin.trim().toUpperCase()),
+    resolveIata(token, destination.trim().toUpperCase()),
+  ]);
+
+  const params = new URLSearchParams({
+    originLocationCode: originCode,
+    destinationLocationCode: destCode,
+    departureDate,
+    adults: String(adults),
+    currencyCode: currency,
+    max: "5",
+  });
+  if (returnDate) params.set("returnDate", returnDate);
+
+  const res = await fetch(
+    `https://test.api.amadeus.com/v2/shopping/flight-offers?${params}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!res.ok) {
+    const err = await res.json();
+    const detail = err.errors?.[0]?.detail ?? "Unknown Amadeus error";
+    return { error: `Flight search failed: ${detail}` };
+  }
+
+  const data = await res.json();
+  if (!data.data?.length) {
+    return {
+      flights: [],
+      message: "No flights found for this route and date combination.",
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const flights = data.data.slice(0, 5).map((offer: any) => {
+    const price = `${parseFloat(offer.price.grandTotal).toFixed(2)} ${offer.price.currency}`;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const formatItinerary = (itin: any) => {
+      const segs = itin.segments;
+      const first = segs[0];
+      const last = segs[segs.length - 1];
+      const carrierCode: string = first.carrierCode;
+      return {
+        airline: CARRIER_NAMES[carrierCode] ?? carrierCode,
+        carrier_code: carrierCode,
+        departs: `${first.departure.iataCode} ${first.departure.at}`,
+        arrives: `${last.arrival.iataCode} ${last.arrival.at}`,
+        duration: formatDuration(itin.duration as string),
+        stops: segs.length - 1,
+      };
+    };
+
+    return {
+      price,
+      outbound: formatItinerary(offer.itineraries[0]),
+      ...(offer.itineraries[1]
+        ? { return: formatItinerary(offer.itineraries[1]) }
+        : {}),
+      booking_link: buildKayakLink(
+        originCode,
+        destCode,
+        departureDate,
+        returnDate,
+        adults,
+      ),
+    };
+  });
+
+  return {
+    origin: originCode,
+    destination: destCode,
+    departure_date: departureDate,
+    return_date: returnDate,
+    adults,
+    currency,
+    flights,
+    search_link: buildKayakLink(
+      originCode,
+      destCode,
+      departureDate,
+      returnDate,
+      adults,
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// get_weather_forecast implementation
+// ---------------------------------------------------------------------------
+
+const WMO_CONDITIONS: Record<number, string> = {
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy",
+  3: "Overcast",
+  45: "Foggy",
+  48: "Icy fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Dense drizzle",
+  61: "Light rain",
+  63: "Moderate rain",
+  65: "Heavy rain",
+  71: "Light snow",
+  73: "Moderate snow",
+  75: "Heavy snow",
+  77: "Snow grains",
+  80: "Light showers",
+  81: "Moderate showers",
+  82: "Heavy showers",
+  85: "Light snow showers",
+  86: "Heavy snow showers",
+  95: "Thunderstorm",
+  96: "Thunderstorm with hail",
+  99: "Thunderstorm with heavy hail",
+};
+
+function buildPackingList(
+  forecast: Array<{
+    high_f: number;
+    low_f: number;
+    precipitation_in: number;
+    weathercode: number;
+  }>,
+): string[] {
+  const packing = new Set<string>();
+
+  const maxHigh = Math.max(...forecast.map((d) => d.high_f));
+  const minLow = Math.min(...forecast.map((d) => d.low_f));
+  const hasRain = forecast.some((d) => d.precipitation_in > 0.05);
+  const hasSnow = forecast.some((d) => d.weathercode >= 71 && d.weathercode <= 77);
+  const hasThunder = forecast.some((d) => d.weathercode >= 95);
+
+  // Temperature-based layers
+  if (maxHigh >= 85) {
+    packing.add("Shorts and t-shirts");
+    packing.add("Sunscreen and sunglasses");
+    packing.add("Hat or cap");
+  }
+  if (minLow < 45) {
+    packing.add("Warm jacket or heavy coat");
+    packing.add("Thermal layers");
+    packing.add("Gloves and scarf");
+  }
+  if (minLow < 32) {
+    packing.add("Heavy winter boots");
+    packing.add("Wool socks");
+  }
+  if (maxHigh >= 50 && minLow >= 32 && maxHigh < 85) {
+    packing.add("Light jacket or layers for variable temps");
+  }
+
+  // Precipitation
+  if (hasRain || hasThunder) {
+    packing.add("Umbrella or compact rain jacket");
+    packing.add("Waterproof shoes or extra dry socks");
+  }
+  if (hasSnow) {
+    packing.add("Snow boots");
+    packing.add("Extra warm socks");
+  }
+
+  // Always
+  packing.add("Comfortable walking shoes");
+  packing.add("Phone charger and power bank");
+  packing.add("Travel adapter (if international)");
+  packing.add("Any medications and toiletries");
+
+  return Array.from(packing);
+}
+
+async function getWeatherForecast(
+  city: string,
+  startDate: string,
+  endDate: string,
+) {
+  // Step 1: Geocode the city
+  const geoRes = await fetch(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
+  );
+  const geoData = await geoRes.json();
+
+  if (!geoData.results?.length) {
+    return { error: `Could not find location: "${city}"` };
+  }
+
+  const { latitude, longitude, name, country } = geoData.results[0];
+
+  // Step 2: Fetch daily forecast
+  const weatherRes = await fetch(
+    `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${latitude}&longitude=${longitude}` +
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode` +
+      `&temperature_unit=fahrenheit` +
+      `&precipitation_unit=inch` +
+      `&timezone=auto` +
+      `&start_date=${startDate}` +
+      `&end_date=${endDate}`,
+  );
+  const weatherData = await weatherRes.json();
+
+  if (!weatherData.daily?.time?.length) {
+    return {
+      error:
+        "Weather data unavailable for this date range. Open-Meteo covers up to 16 days ahead.",
+    };
+  }
+
+  const daily = weatherData.daily;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const forecast = daily.time.map((date: string, i: number) => ({
+    date,
+    condition: WMO_CONDITIONS[daily.weathercode[i] as number] ?? "Unknown",
+    high_f: Math.round(daily.temperature_2m_max[i] as number),
+    low_f: Math.round(daily.temperature_2m_min[i] as number),
+    precipitation_in: (daily.precipitation_sum[i] as number) ?? 0,
+    weathercode: daily.weathercode[i] as number,
+  }));
+
+  const packing = buildPackingList(forecast);
+
+  // Strip weathercode from the returned forecast (it's internal)
+  const displayForecast = forecast.map(
+    ({ weathercode: _wc, ...rest }: { weathercode: number; date: string; condition: string; high_f: number; low_f: number; precipitation_in: number }) => rest,
+  );
+
+  return {
+    destination: `${name}, ${country}`,
+    forecast: displayForecast,
+    packing_list: packing,
+  };
 }

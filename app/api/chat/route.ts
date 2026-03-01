@@ -39,7 +39,25 @@ DELETING EVENTS
 When the user asks to delete an event, call get_events to find it, confirm with the user ("Are you sure you want to delete [event name]?"), then call delete_calendar_event only after they confirm.
 
 DRAFTING EMAILS
-When a user asks you to draft an email, write the full draft directly in your response.`;
+When a user asks you to draft an email, write the full draft directly in your response.
+
+TRIP PLANNING
+When the user mentions a trip or you detect travel events in their calendar (multi-day events, events in a different city, events titled "Trip to...", "Flight", etc.), proactively offer flight and weather help.
+
+Searching flights:
+- Call search_flights with the origin and destination. Use IATA airport codes when you know them; otherwise pass the city name and the tool resolves it.
+- Present each option as: airline, departs → arrives, duration, nonstop or N stop(s), and price.
+- Always include the booking_link from each result so the user can book.
+
+Checking weather:
+- Call get_weather_forecast with the destination city and trip start/end dates.
+- Summarize conditions day-by-day, then present the packing list returned by the tool.
+- If the tool returns an error about date range, tell the user the forecast is not available yet and offer general seasonal advice instead.
+
+Full trip planning workflow (uses 3 tool calls, fits within the 5-call budget):
+1. get_events → find the trip on the calendar (dates, destination).
+2. search_flights → show flight options with booking links.
+3. get_weather_forecast → show weather summary and packing list.`;
 }
 
 export async function POST(req: NextRequest) {
