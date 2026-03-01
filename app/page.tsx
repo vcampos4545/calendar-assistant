@@ -269,9 +269,9 @@ export default function Home() {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
           {/* ── Sidebar ── */}
-          <aside className="w-72 shrink-0 flex flex-col border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 min-h-0">
+          <aside className="w-72 shrink-0 flex flex-col border-r border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 min-h-0">
             {/* Tab nav — vertical */}
-            <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 py-1">
+            <div className="shrink-0 border-b border-zinc-300 dark:border-zinc-700 py-1">
               <SidebarTab
                 active={activeTab === "calendar"}
                 onClick={() => setActiveTab("calendar")}

@@ -172,8 +172,17 @@ function ActivityCard({
           className="shrink-0 p-1 rounded text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
           aria-label="Remove"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-            <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            className="w-4 h-4"
+          >
+            <path
+              fillRule="evenodd"
+              d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z"
+              clipRule="evenodd"
+            />
           </svg>
         </button>
       </div>
@@ -182,14 +191,30 @@ function ActivityCard({
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1">
           <button
-            onClick={() => onChange({ ...activity, timesPerWeek: Math.max(1, activity.timesPerWeek - 1) })}
+            onClick={() =>
+              onChange({
+                ...activity,
+                timesPerWeek: Math.max(1, activity.timesPerWeek - 1),
+              })
+            }
             className="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 font-bold text-sm"
-          >−</button>
-          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 w-4 text-center">{activity.timesPerWeek}</span>
+          >
+            −
+          </button>
+          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 w-4 text-center">
+            {activity.timesPerWeek}
+          </span>
           <button
-            onClick={() => onChange({ ...activity, timesPerWeek: Math.min(7, activity.timesPerWeek + 1) })}
+            onClick={() =>
+              onChange({
+                ...activity,
+                timesPerWeek: Math.min(7, activity.timesPerWeek + 1),
+              })
+            }
             className="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 font-bold text-sm"
-          >+</button>
+          >
+            +
+          </button>
           <span className="text-xs text-zinc-400 ml-0.5">×/wk</span>
         </div>
 
@@ -198,7 +223,8 @@ function ActivityCard({
           onChange={(v) => onChange({ ...activity, durationMinutes: v })}
           options={DURATION_OPTIONS.map((d) => ({
             value: d,
-            label: d >= 60 ? `${d / 60}h${d % 60 ? ` ${d % 60}m` : ""}` : `${d} min`,
+            label:
+              d >= 60 ? `${d / 60}h${d % 60 ? ` ${d % 60}m` : ""}` : `${d} min`,
           }))}
         />
 
@@ -247,7 +273,10 @@ export function PreferencesPanel({
   onSave,
   onScheduleThisWeek,
 }: PreferencesPanelProps) {
-  function set<K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) {
+  function set<K extends keyof UserPreferences>(
+    key: K,
+    value: UserPreferences[K],
+  ) {
     onChange({ ...prefs, [key]: value });
   }
 
@@ -266,19 +295,24 @@ export function PreferencesPanel({
   }
 
   function updateActivity(id: string, updated: RecurringActivity) {
-    set("activities", prefs.activities.map((a) => (a.id === id ? updated : a)));
+    set(
+      "activities",
+      prefs.activities.map((a) => (a.id === id ? updated : a)),
+    );
   }
 
   function removeActivity(id: string) {
-    set("activities", prefs.activities.filter((a) => a.id !== id));
+    set(
+      "activities",
+      prefs.activities.filter((a) => a.id !== id),
+    );
   }
 
   return (
-    <div className="h-full flex flex-col bg-zinc-50 dark:bg-zinc-950">
+    <div className="h-full flex flex-col bg-zinc-50 dark:bg-zinc-900">
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-8 py-8">
-
           {/* ── Row 1: Profile + Work Schedule ── */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
             {/* Profile */}
@@ -345,18 +379,35 @@ export function PreferencesPanel({
                 <div>
                   <FieldLabel>Work hours</FieldLabel>
                   <div className="flex items-center gap-2">
-                    <TimeInput value={prefs.workStartTime} onChange={(v) => set("workStartTime", v)} />
+                    <TimeInput
+                      value={prefs.workStartTime}
+                      onChange={(v) => set("workStartTime", v)}
+                    />
                     <span className="text-xs text-zinc-400">to</span>
-                    <TimeInput value={prefs.workEndTime} onChange={(v) => set("workEndTime", v)} />
+                    <TimeInput
+                      value={prefs.workEndTime}
+                      onChange={(v) => set("workEndTime", v)}
+                    />
                   </div>
                 </div>
 
                 <div>
-                  <FieldLabel>Lunch break <span className="font-normal text-zinc-400">(optional)</span></FieldLabel>
+                  <FieldLabel>
+                    Lunch break{" "}
+                    <span className="font-normal text-zinc-400">
+                      (optional)
+                    </span>
+                  </FieldLabel>
                   <div className="flex items-center gap-2">
-                    <TimeInput value={prefs.lunchBreakStart} onChange={(v) => set("lunchBreakStart", v)} />
+                    <TimeInput
+                      value={prefs.lunchBreakStart}
+                      onChange={(v) => set("lunchBreakStart", v)}
+                    />
                     <span className="text-xs text-zinc-400">to</span>
-                    <TimeInput value={prefs.lunchBreakEnd} onChange={(v) => set("lunchBreakEnd", v)} />
+                    <TimeInput
+                      value={prefs.lunchBreakEnd}
+                      onChange={(v) => set("lunchBreakEnd", v)}
+                    />
                   </div>
                 </div>
 
@@ -407,7 +458,8 @@ export function PreferencesPanel({
               </button>
             </div>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4 -mt-3">
-              Activities you want scheduled every week. The AI will find open slots, respect your preferred times, and avoid conflicts.
+              Activities you want scheduled every week. The AI will find open
+              slots, respect your preferred times, and avoid conflicts.
             </p>
 
             {prefs.activities.length === 0 ? (
@@ -483,7 +535,9 @@ export function PreferencesPanel({
                 <FieldLabel>Additional context for AI</FieldLabel>
                 <textarea
                   value={prefs.additionalContext}
-                  onChange={(e) => set("additionalContext", e.target.value.slice(0, 500))}
+                  onChange={(e) =>
+                    set("additionalContext", e.target.value.slice(0, 500))
+                  }
                   rows={5}
                   maxLength={500}
                   placeholder="e.g. I prefer not to schedule anything before 9:30 on Mondays. I have a standing team lunch on Fridays at noon."
@@ -495,7 +549,6 @@ export function PreferencesPanel({
               </div>
             </div>
           </section>
-
         </div>
       </div>
 
