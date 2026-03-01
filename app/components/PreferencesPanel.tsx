@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type {
   BufferMinutes,
   PreferredTime,
@@ -273,6 +274,14 @@ export function PreferencesPanel({
   onSave,
   onScheduleThisWeek,
 }: PreferencesPanelProps) {
+  const [saved, setSaved] = useState(false);
+
+  function handleSave() {
+    onSave();
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
   function set<K extends keyof UserPreferences>(
     key: K,
     value: UserPreferences[K],
@@ -558,7 +567,12 @@ export function PreferencesPanel({
           <p className="text-xs text-zinc-400">
             Preferences are saved locally and included with every AI request.
           </p>
-          <div className="flex gap-3">
+          <div className="flex items-center gap-3">
+            {saved && (
+              <span className="text-xs text-green-600 dark:text-green-400 font-medium transition-opacity">
+                Saved
+              </span>
+            )}
             {prefs.activities.some((a) => a.name.trim()) && (
               <button
                 onClick={onScheduleThisWeek}
@@ -568,7 +582,7 @@ export function PreferencesPanel({
               </button>
             )}
             <button
-              onClick={onSave}
+              onClick={handleSave}
               className="px-5 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
             >
               Save preferences
