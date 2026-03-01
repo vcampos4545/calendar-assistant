@@ -85,6 +85,13 @@ export async function POST(req: NextRequest) {
   // -------------------------------------------------------------------------
   // ReAct loop: non-streaming calls until no more tool_calls
   // -------------------------------------------------------------------------
+  const MUTATING_TOOLS = new Set([
+    "create_calendar_event",
+    "update_calendar_event",
+    "delete_calendar_event",
+  ]);
+  let calendarModified = false;
+
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -102,6 +109,13 @@ export async function POST(req: NextRequest) {
 
     // Append the assistant's tool-call message to history
     chatMessages.push(choice.message);
+
+    // Track whether any mutating tool was called
+    for (const toolCall of choice.message.tool_calls) {
+      if (MUTATING_TOOLS.has(toolCall.function.name)) {
+        calendarModified = true;
+      }
+    }
 
     // Execute all tool calls (in parallel if there are multiple)
     const toolResults = await Promise.all(
@@ -136,6 +150,9 @@ export async function POST(req: NextRequest) {
   });
 
   return new Response(readable, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Calendar-Modified": calendarModified ? "true" : "false",
+    },
   });
 }

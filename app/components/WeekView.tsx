@@ -173,7 +173,7 @@ export function WeekView({ weekStart, events, loading }: WeekViewProps) {
   const hasAllDay = allDayByDay.some((arr) => arr.length > 0);
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden bg-white dark:bg-zinc-900">
+    <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       {/* Day headers */}
       <div className="flex shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 z-10">
         {/* gutter */}
