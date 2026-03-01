@@ -262,8 +262,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
     }
   }
 
+  const lastMsg = messages[messages.length - 1];
   const showTypingIndicator =
-    streaming && messages.length > 0 && messages[messages.length - 1].content === "";
+    streaming &&
+    messages.length > 0 &&
+    (lastMsg.role === "user" || lastMsg.content === "");
 
   return (
     <div className="flex flex-col h-full min-h-0">
