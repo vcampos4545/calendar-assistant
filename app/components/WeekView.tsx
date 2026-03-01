@@ -294,7 +294,13 @@ export function WeekView({ weekStart, events, loading, onCalendarChange }: WeekV
 
     const startMin = start.getHours() * 60 + start.getMinutes();
     const endMinRaw = end.getHours() * 60 + end.getMinutes();
-    const endMin = endMinRaw <= startMin ? Math.min(startMin + 30, 1440) : endMinRaw;
+    // endMinRaw < startMin means the end time is on the next day (e.g. 10 PM → 12 AM).
+    // Clamp those to 1440 (midnight) so they fill to the bottom of the day column.
+    // Zero-duration events get a 15-minute minimum so they're visible.
+    const endMin =
+      endMinRaw < startMin ? 1440 :
+      endMinRaw === startMin ? startMin + 15 :
+      endMinRaw;
 
     timedByDay[dayIdx].push({
       id: event.id,
