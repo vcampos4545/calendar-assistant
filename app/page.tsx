@@ -102,7 +102,7 @@ export default function Home() {
       <header className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-            Calendar Assistant
+            Calendar Copilot
           </h1>
 
           {/* Week navigation — inside header to keep it compact */}

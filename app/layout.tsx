@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Calendar Assistant",
-  description: "Automate your life!",
+  title: "Calendar Copilot",
+  description: "Your AI-powered calendar assistant.",
 };
 
 export default function RootLayout({

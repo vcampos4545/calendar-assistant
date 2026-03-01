@@ -165,7 +165,7 @@ export function Chat({ onCalendarChange }: ChatProps) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
           <div>
             <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Calendar Assistant
+              Calendar Copilot
             </p>
             <p className="text-xs text-zinc-400">Powered by GPT-4o mini</p>
           </div>
