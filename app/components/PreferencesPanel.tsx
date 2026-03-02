@@ -225,7 +225,7 @@ function ActivityCard({
           options={DURATION_OPTIONS.map((d) => ({
             value: d,
             label:
-              d >= 60 ? `${d / 60}h${d % 60 ? ` ${d % 60}m` : ""}` : `${d} min`,
+              d >= 60 ? `${Math.floor(d / 60)}h${d % 60 ? ` ${d % 60}m` : ""}` : `${d} min`,
           }))}
         />
 
