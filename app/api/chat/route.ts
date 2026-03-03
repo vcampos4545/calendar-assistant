@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
       choice.message.tool_calls.map(async (toolCall) => ({
         role: "tool" as const,
         tool_call_id: toolCall.id,
-        content: JSON.stringify(await executeTool(toolCall, accessToken)),
+        content: JSON.stringify(await executeTool(toolCall, accessToken, timezone)),
       })),
     );
 

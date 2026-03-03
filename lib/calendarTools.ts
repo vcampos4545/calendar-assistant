@@ -254,6 +254,7 @@ export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
 export async function executeTool(
   toolCall: OpenAI.Chat.ChatCompletionMessageToolCall,
   accessToken: string | null,
+  timezone = "UTC",
 ): Promise<unknown> {
   // Narrow the union — custom tool calls don't have .function
   if (toolCall.type !== "function") {
@@ -297,16 +298,22 @@ export async function executeTool(
           args.end_datetime as string,
           args.description as string | undefined,
           args.location as string | undefined,
+          timezone,
         );
 
       case "update_calendar_event":
-        return updateCalendarEvent(accessToken!, args.event_id as string, {
-          summary: args.summary as string | undefined,
-          start_datetime: args.start_datetime as string | undefined,
-          end_datetime: args.end_datetime as string | undefined,
-          description: args.description as string | undefined,
-          location: args.location as string | undefined,
-        });
+        return updateCalendarEvent(
+          accessToken!,
+          args.event_id as string,
+          {
+            summary: args.summary as string | undefined,
+            start_datetime: args.start_datetime as string | undefined,
+            end_datetime: args.end_datetime as string | undefined,
+            description: args.description as string | undefined,
+            location: args.location as string | undefined,
+          },
+          timezone,
+        );
 
       case "delete_calendar_event":
         return deleteCalendarEvent(accessToken!, args.event_id as string);
@@ -315,14 +322,8 @@ export async function executeTool(
         const startDate = args.start_date as string;
         const endDate = args.end_date as string;
         const duration = (args.duration_minutes as number | undefined) ?? 30;
-        const timezone = (args.timezone as string | undefined) ?? "UTC";
-        return getFreeSlots(
-          accessToken!,
-          startDate,
-          endDate,
-          duration,
-          timezone,
-        );
+        const tz = (args.timezone as string | undefined) ?? timezone;
+        return getFreeSlots(accessToken!, startDate, endDate, duration, tz);
       }
 
       case "prepare_email_draft":
@@ -380,28 +381,20 @@ async function getFreeSlots(
   durationMinutes: number,
   timezone: string,
 ) {
-  console.log("getFreeSlots()", startDateStr, endDateStr);
+  console.log("getFreeSlots()", startDateStr, endDateStr, timezone);
   const calApi = google.calendar({ version: "v3", auth: makeGoogleAuth(accessToken) });
 
   const timeMin = new Date(`${startDateStr}T00:00:00Z`).toISOString();
   const timeMax = new Date(`${endDateStr}T23:59:59Z`).toISOString();
 
-  // Fetch calendar timezone and events in parallel
-  const [calMeta, eventsRes] = await Promise.all([
-    calApi.calendars.get({ calendarId: "primary" }),
-    calApi.events.list({
-      calendarId: "primary",
-      timeMin,
-      timeMax,
-      singleEvents: true,
-      orderBy: "startTime",
-      maxResults: 250,
-    }),
-  ]);
-
-  // Calendar timezone is authoritative — beats server timezone and browser hint
-  const tz = calMeta.data.timeZone ?? timezone ?? "UTC";
-  console.log("calendar timezone:", tz);
+  const eventsRes = await calApi.events.list({
+    calendarId: "primary",
+    timeMin,
+    timeMax,
+    singleEvents: true,
+    orderBy: "startTime",
+    maxResults: 250,
+  });
 
   const events = eventsRes.data.items ?? [];
   const slots = computeFreeSlots(
@@ -409,7 +402,7 @@ async function getFreeSlots(
     startDateStr,
     endDateStr,
     durationMinutes,
-    tz,
+    timezone,
   );
   const capped = slots.slice(0, MAX_SLOTS_RETURNED);
 
@@ -605,18 +598,6 @@ async function getEvents(
 }
 
 // ---------------------------------------------------------------------------
-// Calendar timezone detection
-// ---------------------------------------------------------------------------
-
-// Fetches the IANA timezone of the user's primary Google Calendar.
-// This is the authoritative source — avoids relying on server or browser timezone.
-async function getCalendarTimezone(accessToken: string): Promise<string> {
-  const calApi = google.calendar({ version: "v3", auth: makeGoogleAuth(accessToken) });
-  const res = await calApi.calendars.get({ calendarId: "primary" });
-  return res.data.timeZone ?? "UTC";
-}
-
-// ---------------------------------------------------------------------------
 // Datetime normalizer
 // ---------------------------------------------------------------------------
 
@@ -659,8 +640,8 @@ async function createCalendarEvent(
   endDatetime: string,
   description?: string,
   location?: string,
+  tz = "UTC",
 ) {
-  const tz = await getCalendarTimezone(accessToken);
   const calApi = google.calendar({
     version: "v3",
     auth: makeGoogleAuth(accessToken),
@@ -712,8 +693,8 @@ async function updateCalendarEvent(
   accessToken: string,
   eventId: string,
   updates: EventUpdates,
+  tz = "UTC",
 ) {
-  const tz = await getCalendarTimezone(accessToken);
   const calApi = google.calendar({
     version: "v3",
     auth: makeGoogleAuth(accessToken),
