@@ -22,10 +22,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Strip newlines from header fields — a stray \n would split the header line
+  // and cause Gmail to reject the message as malformed.
+  const safeSubject = subject.replace(/[\r\n]+/g, " ").trim();
+  const safeTo = to?.replace(/[\r\n]+/g, " ").trim();
+  // Only include To header if the value contains an actual email address.
+  // A display name without an @ (e.g. "Joe Smith") is not a valid RFC 2822 address
+  // and Gmail will reject the message with "Invalid to header".
+  const toHeader = safeTo?.includes("@") ? safeTo : undefined;
+
   // Build RFC 2822 message and base64url-encode it for the Gmail API
   const headerLines = [
-    to ? `To: ${to}` : null,
-    `Subject: ${subject}`,
+    toHeader ? `To: ${toHeader}` : null,
+    `Subject: ${safeSubject}`,
     "Content-Type: text/plain; charset=utf-8",
     "MIME-Version: 1.0",
   ]
