@@ -194,7 +194,7 @@ export default function Home() {
       .join("; ");
     setActiveTab("calendar");
     chatRef.current?.sendMessage(
-      `Please schedule my recurring activities for this week. Activities: ${list}. Use get_free_slots to find open slots and create_calendar_event to schedule each one.`,
+      `Please schedule my recurring activities for this week: ${list}. Check my calendar for open slots and add each one.`,
     );
   }
 
