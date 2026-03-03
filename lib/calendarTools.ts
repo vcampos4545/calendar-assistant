@@ -136,10 +136,10 @@ export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
           timezone: {
             type: "string",
             description:
-              "IANA timezone identifier (e.g. 'America/New_York'). Always pass this — the system prompt provides the user's timezone.",
+              "IANA timezone identifier (e.g. 'America/New_York'). Optional — the server detects it from the user's Google Calendar settings.",
           },
         },
-        required: ["start_date", "end_date", "timezone"],
+        required: ["start_date", "end_date"],
       },
     },
   },
@@ -316,7 +316,13 @@ export async function executeTool(
         const endDate = args.end_date as string;
         const duration = (args.duration_minutes as number | undefined) ?? 30;
         const timezone = (args.timezone as string | undefined) ?? "UTC";
-        return getFreeSlots(accessToken!, startDate, endDate, duration, timezone);
+        return getFreeSlots(
+          accessToken!,
+          startDate,
+          endDate,
+          duration,
+          timezone,
+        );
       }
 
       case "prepare_email_draft":
@@ -374,29 +380,36 @@ async function getFreeSlots(
   durationMinutes: number,
   timezone: string,
 ) {
-  console.log("getFreeSlots()", startDateStr, endDateStr, timezone);
-  const oauth2Client = makeGoogleAuth(accessToken);
-  const calApi = google.calendar({ version: "v3", auth: oauth2Client });
+  console.log("getFreeSlots()", startDateStr, endDateStr);
+  const calApi = google.calendar({ version: "v3", auth: makeGoogleAuth(accessToken) });
 
-  const timeMin = new Date(`${startDateStr}T00:00:00`).toISOString();
-  const timeMax = new Date(`${endDateStr}T23:59:59`).toISOString();
+  const timeMin = new Date(`${startDateStr}T00:00:00Z`).toISOString();
+  const timeMax = new Date(`${endDateStr}T23:59:59Z`).toISOString();
 
-  const res = await calApi.events.list({
-    calendarId: "primary",
-    timeMin,
-    timeMax,
-    singleEvents: true,
-    orderBy: "startTime",
-    maxResults: 250,
-  });
+  // Fetch calendar timezone and events in parallel
+  const [calMeta, eventsRes] = await Promise.all([
+    calApi.calendars.get({ calendarId: "primary" }),
+    calApi.events.list({
+      calendarId: "primary",
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 250,
+    }),
+  ]);
 
-  const events = res.data.items ?? [];
+  // Calendar timezone is authoritative — beats server timezone and browser hint
+  const tz = calMeta.data.timeZone ?? timezone ?? "UTC";
+  console.log("calendar timezone:", tz);
+
+  const events = eventsRes.data.items ?? [];
   const slots = computeFreeSlots(
     events,
     startDateStr,
     endDateStr,
     durationMinutes,
-    timezone,
+    tz,
   );
   const capped = slots.slice(0, MAX_SLOTS_RETURNED);
 
@@ -447,7 +460,9 @@ function dateAtHourInTZ(dateStr: string, hour: number, timezone: string): Date {
   const noonUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
   const offsetMin = tzOffsetMin(timezone, noonUtc);
   // utc_ms = local_ms - offset  (local "hour:00" expressed as if it were UTC, minus offset)
-  return new Date(Date.UTC(year, month - 1, day, hour, 0, 0) - offsetMin * 60_000);
+  return new Date(
+    Date.UTC(year, month - 1, day, hour, 0, 0) - offsetMin * 60_000,
+  );
 }
 
 // Increments a YYYY-MM-DD string by `days` days (UTC-safe, no server-timezone dependence).
@@ -590,39 +605,47 @@ async function getEvents(
 }
 
 // ---------------------------------------------------------------------------
+// Calendar timezone detection
+// ---------------------------------------------------------------------------
+
+// Fetches the IANA timezone of the user's primary Google Calendar.
+// This is the authoritative source — avoids relying on server or browser timezone.
+async function getCalendarTimezone(accessToken: string): Promise<string> {
+  const calApi = google.calendar({ version: "v3", auth: makeGoogleAuth(accessToken) });
+  const res = await calApi.calendars.get({ calendarId: "primary" });
+  return res.data.timeZone ?? "UTC";
+}
+
+// ---------------------------------------------------------------------------
 // Datetime normalizer
 // ---------------------------------------------------------------------------
 
-// Converts any datetime string the LLM might produce into a full RFC 3339
-// string with the server's UTC offset embedded (e.g. 2026-03-01T09:00:00-08:00).
-// This is unambiguous to Google Calendar and requires no separate timeZone field.
-function toRFC3339WithOffset(dt: string): string {
-  // Strip any existing timezone suffix so we can re-attach the correct one
+// Converts an LLM-produced datetime string (YYYY-MM-DDTHH:MM:SS, no suffix)
+// into a full RFC 3339 string with the user's calendar timezone offset attached
+// (e.g. "2026-03-03T09:00:00-05:00"). Uses tzOffsetMin so it works correctly
+// on Vercel (UTC server) — no reliance on server-local timezone.
+function toRFC3339InTZ(dt: string, timezone: string): string {
   const clean = dt.replace(/(Z|[+-]\d{2}:?\d{2})$/, "");
-  // Pad HH:MM → HH:MM:SS if seconds are missing
   const withSecs = /T\d{2}:\d{2}$/.test(clean) ? `${clean}:00` : clean;
-  // Parse as local time — Node.js treats YYYY-MM-DDTHH:MM:SS (no suffix) as local
-  const date = new Date(withSecs);
-  if (isNaN(date.getTime())) throw new Error(`Invalid datetime: "${dt}"`);
-  // Detect JS silently rolling over invalid dates (e.g. Feb 29 in a non-leap year)
   const [datePart] = withSecs.split("T");
   const [y, m, d] = datePart.split("-").map(Number);
+  // Use noon UTC on that date to get a stable DST-aware offset
+  const noonUtc = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  // Validate: if the date rolled over (e.g. Feb 30), UTC components won't match
   if (
-    date.getFullYear() !== y ||
-    date.getMonth() + 1 !== m ||
-    date.getDate() !== d
+    noonUtc.getUTCFullYear() !== y ||
+    noonUtc.getUTCMonth() + 1 !== m ||
+    noonUtc.getUTCDate() !== d
   ) {
     throw new Error(
       `"${datePart}" is not a valid calendar date. Please use an existing date.`,
     );
   }
-  // getTimezoneOffset() = minutes to add to local to get UTC, so negate for the offset
-  const offsetMin = -date.getTimezoneOffset();
+  const offsetMin = tzOffsetMin(timezone, noonUtc);
+  const pad = (n: number) => String(n).padStart(2, "0");
   const sign = offsetMin >= 0 ? "+" : "-";
-  const absMin = Math.abs(offsetMin);
-  const hh = String(Math.floor(absMin / 60)).padStart(2, "0");
-  const mm = String(absMin % 60).padStart(2, "0");
-  return `${withSecs}${sign}${hh}:${mm}`;
+  const absOff = Math.abs(Math.round(offsetMin));
+  return `${withSecs}${sign}${pad(Math.floor(absOff / 60))}:${pad(absOff % 60)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -637,6 +660,7 @@ async function createCalendarEvent(
   description?: string,
   location?: string,
 ) {
+  const tz = await getCalendarTimezone(accessToken);
   const calApi = google.calendar({
     version: "v3",
     auth: makeGoogleAuth(accessToken),
@@ -644,8 +668,8 @@ async function createCalendarEvent(
 
   const requestBody: calendar_v3.Schema$Event = {
     summary,
-    start: { dateTime: toRFC3339WithOffset(startDatetime) },
-    end: { dateTime: toRFC3339WithOffset(endDatetime) },
+    start: { dateTime: toRFC3339InTZ(startDatetime, tz) },
+    end: { dateTime: toRFC3339InTZ(endDatetime, tz) },
   };
   if (description) requestBody.description = description;
   if (location) requestBody.location = location;
@@ -689,6 +713,7 @@ async function updateCalendarEvent(
   eventId: string,
   updates: EventUpdates,
 ) {
+  const tz = await getCalendarTimezone(accessToken);
   const calApi = google.calendar({
     version: "v3",
     auth: makeGoogleAuth(accessToken),
@@ -700,9 +725,9 @@ async function updateCalendarEvent(
     patch.description = updates.description;
   if (updates.location !== undefined) patch.location = updates.location;
   if (updates.start_datetime !== undefined)
-    patch.start = { dateTime: toRFC3339WithOffset(updates.start_datetime) };
+    patch.start = { dateTime: toRFC3339InTZ(updates.start_datetime, tz) };
   if (updates.end_datetime !== undefined)
-    patch.end = { dateTime: toRFC3339WithOffset(updates.end_datetime) };
+    patch.end = { dateTime: toRFC3339InTZ(updates.end_datetime, tz) };
 
   try {
     const res = await calApi.events.patch({
@@ -1068,6 +1093,7 @@ async function getWeatherForecast(
   startDate: string,
   endDate: string,
 ) {
+  console.log("getWeatherForecast()");
   // Step 1: Geocode the city
   const geoRes = await fetch(
     `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,

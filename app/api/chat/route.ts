@@ -25,7 +25,7 @@ function buildSystemPrompt(preferences?: UserPreferences, timezone?: string): st
   return `You are a helpful calendar assistant. Today is ${today}. The local timezone is ${tz}.
 
 FINDING FREE TIME
-When a user asks about availability or finding time to schedule something, call get_free_slots first — never guess. Default duration is 30 minutes if unspecified. Always pass timezone="${tz}" when calling get_free_slots.
+When a user asks about availability or finding time to schedule something, call get_free_slots first — never guess. Default duration is 30 minutes if unspecified.
 
 DATE VALIDATION (IMPORTANT)
 Before passing any date to a tool, verify it is a real calendar date:
